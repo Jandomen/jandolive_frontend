@@ -6,7 +6,9 @@ export default function useWebRTC(socket, roomId) {
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
   const [isAudioEnabled, setIsAudioEnabled] = useState(false);
   const [error, setError] = useState(null);
+
   const peerConnection = useRef(null);
+  const tracksAdded = useRef(false); // <- NUEVO: para evitar añadir tracks duplicados
 
   const startMedia = async (video = false, audio = false) => {
     if (!video && !audio) return;
@@ -20,8 +22,9 @@ export default function useWebRTC(socket, roomId) {
       setIsVideoEnabled(video);
       setIsAudioEnabled(audio);
 
-      if (peerConnection.current) {
+      if (peerConnection.current && !tracksAdded.current) {
         stream.getTracks().forEach(track => peerConnection.current.addTrack(track, stream));
+        tracksAdded.current = true; // <-- marcar como añadidos
       }
     } catch (err) {
       console.error('WebRTC error:', err);
@@ -48,58 +51,77 @@ export default function useWebRTC(socket, roomId) {
     }
   };
 
+  // Crear PeerConnection solo una vez
   useEffect(() => {
     if (!socket || !roomId) return;
-    let isMounted = true;
 
-    peerConnection.current = new RTCPeerConnection({
+    const pc = new RTCPeerConnection({
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     });
+    peerConnection.current = pc;
 
-    peerConnection.current.ontrack = (event) => {
-      if (isMounted) setRemoteStream(event.streams[0]);
+    pc.ontrack = (event) => {
+      setRemoteStream(event.streams[0]);
     };
 
-    peerConnection.current.onicecandidate = (event) => {
+    pc.onicecandidate = (event) => {
       if (event.candidate) socket.emit('ice-candidate', { roomId, candidate: event.candidate });
     };
 
-    if (localStream) {
-      localStream.getTracks().forEach(track => peerConnection.current.addTrack(track, localStream));
-      (async () => {
+    return () => {
+      pc.close();
+      peerConnection.current = null;
+      tracksAdded.current = false;
+    };
+  }, [socket, roomId]);
+
+  // Crear oferta solo después de tener tracks locales
+  useEffect(() => {
+    if (!peerConnection.current || !localStream || !tracksAdded.current) return;
+
+    (async () => {
+      try {
         const offer = await peerConnection.current.createOffer();
         await peerConnection.current.setLocalDescription(offer);
         socket.emit('offer', { roomId, offer });
-      })();
-    }
+      } catch (err) {
+        console.error('Error creando offer:', err);
+      }
+    })();
+  }, [localStream, socket, roomId]);
 
-    return () => {
-      isMounted = false;
-      if (peerConnection.current) peerConnection.current.close();
-      if (localStream) localStream.getTracks().forEach(track => track.stop());
-    };
-  }, [socket, roomId, localStream]);
-
+  // Manejo de offer/answer/ICE
   useEffect(() => {
     if (!socket) return;
 
     const handleOffer = async ({ offer }) => {
       if (!peerConnection.current) return;
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
-      socket.emit('answer', { roomId, answer });
+      try {
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peerConnection.current.createAnswer();
+        await peerConnection.current.setLocalDescription(answer);
+        socket.emit('answer', { roomId, answer });
+      } catch (err) {
+        console.error('Error manejando offer:', err);
+      }
     };
 
     const handleAnswer = async ({ answer }) => {
       if (!peerConnection.current) return;
-      await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+      try {
+        await peerConnection.current.setRemoteDescription(new RTCSessionDescription(answer));
+      } catch (err) {
+        console.error('Error manejando answer:', err);
+      }
     };
 
     const handleIceCandidate = async ({ candidate }) => {
       if (!peerConnection.current) return;
-      try { await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate)); } 
-      catch (err) { console.error('ICE Error:', err); }
+      try {
+        await peerConnection.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('Error agregando ICE candidate:', err);
+      }
     };
 
     socket.on('offer', handleOffer);
@@ -113,5 +135,14 @@ export default function useWebRTC(socket, roomId) {
     };
   }, [socket, roomId]);
 
-  return { localStream, remoteStream, toggleVideo, toggleAudio, isVideoEnabled, isAudioEnabled, error, startMedia };
+  return {
+    localStream,
+    remoteStream,
+    toggleVideo,
+    toggleAudio,
+    isVideoEnabled,
+    isAudioEnabled,
+    error,
+    startMedia,
+  };
 }

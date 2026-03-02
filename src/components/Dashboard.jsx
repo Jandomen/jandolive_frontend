@@ -49,7 +49,9 @@ export default function Dashboard() {
       socket.off('error');
       socket.off('call-ended');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   const showAlert = (title, message, type = 'info') => {
     setModalConfig({ title, message, type });

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { socket } from '../services/socket';
-import { FiMonitor, FiVideo } from 'react-icons/fi';
+import { FiMonitor, FiVideo, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 
 const configuration = {
   iceServers: [
@@ -15,8 +15,21 @@ export default function VideoChat({ roomId }) {
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const [remoteStreams, setRemoteStreams] = useState({});
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
+
+  const nextPerson = () => {
+    const total = Object.keys(remoteStreams).length;
+    if (total === 0) return;
+    setCurrentIndex((prev) => (prev + 1) % total);
+  };
+
+  const prevPerson = () => {
+    const total = Object.keys(remoteStreams).length;
+    if (total === 0) return;
+    setCurrentIndex((prev) => (prev - 1 + total) % total);
+  };
 
   useEffect(() => {
     if (!roomId) return;
@@ -175,6 +188,8 @@ export default function VideoChat({ roomId }) {
     setIsSharingScreen(false);
   };
 
+  const streamsArray = Object.entries(remoteStreams);
+
   return (
     <div className="relative w-full h-full min-h-[460px] bg-black/80 backdrop-blur-md rounded-[40px] overflow-hidden border border-white/10 shadow-3xl animate-in fade-in zoom-in duration-500">
 
@@ -190,7 +205,7 @@ export default function VideoChat({ roomId }) {
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center">
-        {Object.entries(remoteStreams).length === 0 ? (
+        {streamsArray.length === 0 ? (
           <div className="flex flex-col items-center gap-5">
             <div className="w-20 h-20 border-[6px] border-white/10 border-t-indigo-500 rounded-full animate-spin shadow-2xl relative">
               <div className="absolute inset-0 rounded-full shadow-[0_0_20px_#6366f1] animate-pulse"></div>
@@ -198,22 +213,56 @@ export default function VideoChat({ roomId }) {
             <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">Esperando amigos...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5 p-6 sm:p-8 w-full h-full">
-            {Object.entries(remoteStreams).map(([id, stream]) => (
-              <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl transition-all hover:border-indigo-500/50 hover:scale-[1.02]">
-                <video autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
-                <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
-                  <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
-                  <span className="text-white text-[10px] font-black uppercase tracking-widest">En Línea</span>
+          <div className="relative w-full h-full flex items-center justify-center p-6 sm:p-8">
+            {/* Grid Layout for Desktop */}
+            <div className="hidden lg:grid lg:grid-cols-2 gap-5 w-full h-full">
+              {streamsArray.map(([id, stream]) => (
+                <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl transition-all hover:border-indigo-500/50">
+                  <video autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
+                  <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
+                    <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
+                    <span className="text-white text-[10px] font-black uppercase tracking-widest">En Línea</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
+
+            {/* Carousel Layout for Mobile/Small tablets */}
+            <div className="flex lg:hidden flex-col items-center justify-center w-full h-full relative group">
+              {streamsArray[currentIndex] && (
+                <div className="relative w-full aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 shadow-3xl animate-in fade-in slide-in-from-right-4 duration-500">
+                  <video key={streamsArray[currentIndex][0]} autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = streamsArray[currentIndex][1])} className="w-full h-full object-cover" />
+                  <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
+                    <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
+                    <span className="text-white text-[10px] font-black uppercase tracking-widest">Participante {currentIndex + 1}/{streamsArray.length}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Navigation Buttons for Carousel */}
+              {streamsArray.length > 1 && (
+                <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none">
+                  <button
+                    onClick={prevPerson}
+                    className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"
+                  >
+                    <FiChevronLeft size={24} />
+                  </button>
+                  <button
+                    onClick={nextPerson}
+                    className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"
+                  >
+                    <FiChevronRight size={24} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
 
       {/* Miniatura Local (Tu Cámara) - Diseño Premium */}
-      <div className={`absolute bottom-6 left-6 sm:left-auto sm:right-6 ${isSharingScreen ? 'w-full max-w-[260px]' : 'w-44 h-32 sm:w-56 sm:h-40'} bg-black/60 backdrop-blur-3xl border border-white/30 rounded-[28px] overflow-hidden shadow-3xl transition-all duration-700 hover:rotate-1 group ring-2 ring-white/10`}>
+      <div className={`absolute bottom-6 left-6 sm:left-auto sm:right-6 ${isSharingScreen ? 'w-full max-w-[260px]' : 'w-36 h-28 sm:w-56 sm:h-40'} bg-black/60 backdrop-blur-3xl border border-white/30 rounded-[28px] overflow-hidden shadow-3xl transition-all duration-700 hover:rotate-1 group ring-2 ring-white/10 z-[30]`}>
         <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-500" />
         <div className="absolute top-3 left-3 px-3 py-1 bg-indigo-600 rounded-xl border border-white/20 text-white text-[8px] font-black uppercase tracking-widest shadow-xl">
           {isSharingScreen ? 'Tu Pantalla' : 'Tú'}

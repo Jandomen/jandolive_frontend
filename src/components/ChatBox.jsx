@@ -7,19 +7,12 @@ export default function ChatBox({ roomId, onLeave }) {
   const [messages, setMessages] = useState([]);
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   useEffect(() => {
-    const handleMessage = (msg) => {
-      setMessages((prev) => [...prev, msg]);
-    };
-
+    const handleMessage = (msg) => setMessages((prev) => [...prev, msg]);
     socket.on('chat-message', handleMessage);
     return () => socket.off('chat-message', handleMessage);
   }, []);
@@ -35,61 +28,68 @@ export default function ChatBox({ roomId, onLeave }) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-white/10 backdrop-blur-xl rounded-[32px] border border-white/20 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-right-8 duration-700">
-      {/* Header Chat */}
-      <div className="px-6 py-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+    <div className="flex flex-col h-full bg-black/40 backdrop-blur-3xl rounded-[40px] border border-white/20 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-8 duration-700">
+      {/* Header Estilo Android/iOS */}
+      <div className="px-6 py-5 border-b border-white/10 bg-white/5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-500/20 rounded-lg">
-            <FiGlobe className="text-indigo-400" />
+          <div className="p-2.5 bg-indigo-500/20 rounded-2xl ring-1 ring-white/10">
+            <FiGlobe className="text-indigo-400 text-xl" />
           </div>
           <div>
-            <h3 className="text-white font-bold text-sm">Chat en Vivo</h3>
-            <p className="text-white/40 text-[10px] uppercase tracking-widest font-black">Conexión Segura</p>
+            <h3 className="text-white font-black text-sm tracking-tight">Sala de Chat</h3>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse shadow-[0_0_8px_#4ade80]"></div>
+              <p className="text-white/40 text-[9px] uppercase tracking-[0.2em] font-black truncate">Chat Activo</p>
+            </div>
           </div>
         </div>
         <button
           onClick={onLeave}
-          className="px-4 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all shadow-lg"
+          className="px-5 py-2 bg-red-500/10 text-red-500 border border-red-500/30 rounded-full text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all shadow-xl active:scale-95"
         >
           Salir
         </button>
       </div>
 
-      {/* Mensajes */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+      {/* Burbujas de Chat */}
+      <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar bg-gradient-to-b from-transparent to-black/20">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center opacity-30 space-y-2">
-            <FiUser size={40} className="text-white" />
-            <p className="text-white text-xs font-bold uppercase tracking-widest">Di hola para empezar...</p>
+          <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-4">
+            <div className="p-6 bg-white/5 rounded-full border border-white/10">
+              <FiUser size={48} className="text-white" />
+            </div>
+            <p className="text-white text-[10px] font-black uppercase tracking-[0.3em]">Di algo increíble...</p>
           </div>
         ) : (
           messages.map((msg, idx) => (
-            <div key={idx} className={`flex flex-col ${msg.fromMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-              <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${msg.fromMe ? 'bg-indigo-600 text-white rounded-tr-none shadow-indigo-500/20' : 'bg-white/10 text-blue-100 border border-white/10 rounded-tl-none shadow-black/10 shadow-lg'}`}>
+            <div key={idx} className={`flex flex-col ${msg.fromMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-4 duration-500`}>
+              <div className={`max-w-[80%] px-5 py-3.5 rounded-[22px] text-sm leading-relaxed shadow-lg ${msg.fromMe ? 'bg-indigo-600/90 text-white rounded-tr-none shadow-indigo-600/20 ring-1 ring-white/20' : 'bg-white/10 text-blue-100 border border-white/20 rounded-tl-none shadow-black/40 backdrop-blur-md'}`}>
                 {msg.text}
               </div>
-              <span className="text-[10px] text-white/30 font-bold mt-1 uppercase px-1">{msg.time}</span>
+              <span className="text-[9px] text-white/30 font-black mt-2 uppercase px-2 tracking-widest">{msg.time}</span>
             </div>
           ))
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Formulario de Envío - Optimizado para móvil */}
-      <form onSubmit={sendMessage} className="p-4 bg-white/5 border-t border-white/10 flex gap-2 items-center">
-        <input
-          type="text"
-          placeholder="Escribe un mensaje..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-5 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
-        />
+      {/* Input de Chat - Diseñado para dedos grandes 🔘📱 */}
+      <form onSubmit={sendMessage} className="p-5 pb-8 sm:pb-5 bg-white/5 border-t border-white/10 flex gap-3 items-center">
+        <div className="relative flex-1 group">
+          <input
+            type="text"
+            placeholder="Escribe aquí..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            className="w-full bg-white/10 border border-white/20 rounded-[28px] px-6 py-4 text-white placeholder-white/30 focus:ring-2 focus:ring-indigo-500/50 focus:outline-none text-[15px] transition-all shadow-inner group-hover:bg-white/15"
+          />
+        </div>
         <button
           type="submit"
-          className="p-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-500 active:scale-95 transition-all shadow-xl flex items-center justify-center min-w-[56px] shadow-indigo-600/30"
+          className="w-14 h-14 bg-indigo-600 text-white rounded-[24px] hover:bg-indigo-500 active:scale-90 transition-all shadow-[0_10px_20px_rgba(79,70,229,0.3)] flex items-center justify-center flex-none ring-1 ring-white/20 group hover:shadow-indigo-500/40"
           title="Enviar Mensaje"
         >
-          <FiSend className="text-xl" />
+          <FiSend className="text-2xl group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
         </button>
       </form>
     </div>

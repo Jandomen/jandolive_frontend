@@ -7,7 +7,7 @@ import { FiCircle, FiUsers, FiKey, FiCopy } from 'react-icons/fi';
 import Modal from './Modal';
 
 export default function Dashboard() {
-  const [status, setStatus] = useState('idle');
+  const [status, setStatus] = useState('idle'); // idle, searching, joining, matched, waiting-private
   const [roomId, setRoomId] = useState(null);
   const [joinCode, setJoinCode] = useState('');
   const [createdCode, setCreatedCode] = useState(null);
@@ -16,27 +16,16 @@ export default function Dashboard() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalConfig, setModalConfig] = useState({ title: '', message: '', type: 'info' });
 
-  const showAlert = (title, message, type = 'info') => {
-    setModalConfig({ title, message, type });
-    setIsModalOpen(true);
-  };
-
   useEffect(() => {
     connectSocket();
 
     socket.on('connect', () => console.log('✅ Socket connected:', socket.id));
-    socket.on('matched', ({ roomId: rid }) => {
-      setRoomId(rid);
-      setStatus('matched');
-    });
-    socket.on('waiting', () => setStatus('searching'));
     socket.on('joined-room', ({ roomId: rid }) => {
       setRoomId(rid);
       setStatus('matched');
     });
     socket.on('private-room-created', ({ roomId: rid }) => {
       setCreatedCode(rid);
-      setRoomId(rid);
       setStatus('waiting-private');
     });
     socket.on('user-joined', () => {
@@ -48,33 +37,26 @@ export default function Dashboard() {
       setStatus('idle');
     });
     socket.on('call-ended', () => {
-      // 🚨 Este evento solo llega si la sala realmente se vació (quedaban 2 o menos)
-      setStatus('idle');
-      setRoomId(null);
-      setCreatedCode(null);
-      showAlert('Llamada Finalizada', 'La otra persona se ha ido o se ha cerrado la sala.', 'info');
+      leave();
+      showAlert('Llamada Finalizada', 'La otra persona se ha ido.', 'info');
     });
-
-    socket.on('peer-left', ({ socketId }) => {
-      // En grupos, esto NO debe sacarte del Dashboard
-      console.log(`👤 El usuario ${socketId} ha salido de la llamada.`);
-      // VideoChat se encarga de quitar el video automáticamente
-    });
-
 
     return () => {
       socket.off('connect');
-      socket.off('matched');
-      socket.off('waiting');
       socket.off('joined-room');
       socket.off('private-room-created');
       socket.off('user-joined');
       socket.off('error');
-      socket.off('peer-left');
+      socket.off('call-ended');
     };
   }, []);
 
-  const startRandomSearch = () => {
+  const showAlert = (title, message, type = 'info') => {
+    setModalConfig({ title, message, type });
+    setIsModalOpen(true);
+  };
+
+  const startSearching = () => {
     setStatus('searching');
     socket.emit('ready');
   };
@@ -87,16 +69,17 @@ export default function Dashboard() {
 
   const joinByCode = () => {
     if (!joinCode.trim()) {
-      return showAlert('Campo Requerido', 'Por favor, ingresa un código válido para unirte.', 'error');
+      return showAlert('Código requerido', 'Por favor, ingresa el código de la sala.', 'error');
     }
     setStatus('joining');
-    socket.emit('join-room', { roomId: joinCode.trim().toUpperCase() });
+    socket.emit('join-room', { roomId: joinCode.toUpperCase() });
   };
 
   const leave = () => {
-    // Informamos al servidor para que nos quite de la lista de espera o de la sala
-    socket.emit('leave', { roomId });
-
+    if (roomId || createdCode) {
+      socket.emit('leave', { roomId: roomId || createdCode });
+    }
+    // 🧹 Limpieza TOTAL de estados para evitar re-carga de página
     setStatus('idle');
     setRoomId(null);
     setCreatedCode(null);
@@ -106,179 +89,163 @@ export default function Dashboard() {
   const copyCode = () => {
     if (createdCode) {
       navigator.clipboard.writeText(createdCode);
-      showAlert('¡Copiado!', 'El código de la sala se ha copiado al portapapeles. 📋', 'info');
+      showAlert('¡Copiado!', `El código ${createdCode} está en tu portapapeles. ✨`, 'info');
     }
   };
 
   return (
-    <div className="relative flex flex-col min-h-screen bg-gradient-to-br from-indigo-600 via-violet-600 to-pink-500 overflow-hidden font-['Outfit']">
-      <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 pointer-events-none"></div>
-
-      {/* Header Glassmorphism */}
-      <header className="sticky top-0 z-50 w-full backdrop-blur-lg bg-white/10 border-b border-white/20 px-8 py-4 flex justify-between items-center shadow-xl">
+    <div className="min-h-screen bg-[#0a0a0c] selection:bg-indigo-500/30 font-['Outfit'] overflow-x-hidden flex flex-col">
+      {/* Header Premium */}
+      <header className="fixed top-0 w-full z-50 bg-[#0a0a0c]/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="relative flex items-center justify-center">
-            <div className="absolute w-4 h-4 bg-red-500 rounded-full animate-pulse-live"></div>
-            <FiCircle className="text-white text-xl relative z-10" />
-          </div>
-          <h1 className="text-2xl font-black text-white tracking-tighter italic">
-            JANDOLIVE
-          </h1>
-
+          <div className="w-4 h-4 rounded-full bg-red-600 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]"></div>
+          <h1 className="text-2xl font-black text-white tracking-widest">JANDOLIVE</h1>
         </div>
-        <div className="hidden sm:flex items-center gap-2">
-          <span className="text-xs font-bold text-white/50 uppercase tracking-widest">Global Network</span>
-          <div className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_12px_rgba(74,222,128,0.8)]"></div>
+        <div className="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10">
+          <FiUsers className="text-white/40 text-sm" />
+          <span className="text-white font-bold text-xs">JANDO LIVE ONLINE</span>
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 w-full">
+      <main className="flex-1 flex flex-col items-center justify-center p-4 pt-24 pb-8 w-full max-w-screen-2xl mx-auto overflow-y-auto">
+
+        {/* State: IDLE (Menú Principal) */}
         {status === 'idle' && (
-          <div className="text-center max-w-2xl space-y-8 bg-white/10 backdrop-blur-xl p-10 rounded-3xl border border-white/20 shadow-2xl animate-in fade-in zoom-in duration-500">
-            <div className="space-y-2">
-              <h2 className="text-4xl font-extrabold text-white">
-                ¡Conecta ahora! 🌎
-              </h2>
-              <p className="text-blue-100 text-lg opacity-80 leading-relaxed">
-                Elige un modo y comienza a charlar con personas de todo el mundo al instante.
-              </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl animate-in fade-in slide-in-from-bottom-12 duration-700">
+            {/* Opción 1: Random */}
+            <div className="group relative bg-[#121216] backdrop-blur-3xl p-10 rounded-[40px] border border-white/10 shadow-3xl hover:border-indigo-500/50 transition-all duration-500 overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-700">
+                <FiCircle size={150} />
+              </div>
+              <h2 className="text-3xl font-black text-white mb-4">Chat Aleatorio</h2>
+              <p className="text-white/50 mb-8 font-medium">Conoce gente nueva al instante en un video 1 a 1 de forma segura.</p>
+              <button
+                onClick={startSearching}
+                className="w-full bg-indigo-600 text-white font-black py-5 rounded-[24px] shadow-2xl hover:bg-indigo-500 active:scale-95 transition-all tracking-widest uppercase text-xs"
+              >
+                Empezar Búsqueda
+              </button>
             </div>
 
-            {/* Opciones */}
-            <div className="flex flex-col md:flex-row justify-center items-center gap-6">
-              <button
-                onClick={startRandomSearch}
-                className="group relative flex items-center gap-3 px-8 py-4 bg-white text-indigo-600 text-lg font-bold rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.2)] hover:shadow-[0_15px_30px_rgba(0,0,0,0.3)] hover:-translate-y-1 transition-all duration-300 overflow-hidden"
-              >
-                <div className="absolute inset-0 bg-indigo-50 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
-                <FiUsers className="relative z-10 text-xl" />
-                <span className="relative z-10">Búsqueda Aleatoria</span>
-              </button>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={createPrivateRoom}
-                  className="group relative flex items-center justify-center gap-3 px-8 py-4 bg-white/10 text-white text-lg font-bold rounded-2xl shadow-xl border border-white/30 hover:bg-white/20 hover:scale-105 transition-all duration-300"
-                >
-                  <FiKey className="text-xl" /> Crear Sala Privada
-                </button>
-                <div className="flex items-center justify-center gap-2">
-                  <span className="text-white/60 text-xs font-bold uppercase tracking-widest">Límite:</span>
-                  <input
-                    type="number"
-                    min="2" max="20"
-                    value={maxParticipants}
-                    onChange={(e) => setMaxParticipants(e.target.value)}
-                    className="w-16 bg-white/5 border border-white/20 rounded-lg px-2 py-1 text-white text-center font-bold"
-                  />
-                  <FiUsers className="text-white/40" />
-                </div>
+            {/* Opción 2: Privado */}
+            <div className="bg-[#121216]/50 backdrop-blur-2xl p-10 rounded-[40px] border border-white/5 space-y-8 shadow-2xl">
+              <div className="flex flex-col gap-4">
+                <h2 className="text-3xl font-black text-white">Sala Privada</h2>
+                <p className="text-white/40 text-xs font-bold uppercase tracking-widest">Crea un link exclusivo para tus amigos</p>
               </div>
 
+              <div className="flex flex-col gap-4">
+                <button
+                  onClick={createPrivateRoom}
+                  className="w-full bg-white/5 text-white border border-white/20 font-black py-4 rounded-[24px] hover:bg-white/10 transition-all tracking-widest uppercase text-xs flex items-center justify-center gap-3"
+                >
+                  <FiKey /> Crear Nueva Sala
+                </button>
+                <div className="flex items-center justify-center gap-3 px-4 py-2 bg-indigo-500/5 rounded-xl border border-indigo-500/10">
+                  <span className="text-white/40 text-[10px] font-black tracking-widest uppercase">Límite:</span>
+                  <input
+                    type="number" min="2" max="20"
+                    value={maxParticipants}
+                    onChange={(e) => setMaxParticipants(e.target.value)}
+                    className="w-12 bg-transparent text-indigo-400 font-black text-center outline-none"
+                  />
+                  <FiUsers className="text-indigo-400/40 text-xs" />
+                </div>
+              </div>
             </div>
 
             {/* Unirse por código */}
-            <div className="flex flex-col items-center gap-4 pt-4 border-t border-white/10">
-              <div className="flex flex-col sm:flex-row gap-3 w-full max-w-sm">
+            <div className="md:col-span-2 bg-white/5 backdrop-blur-md p-8 rounded-[36px] border border-white/10 shadow-xl flex flex-col md:flex-row items-center gap-6">
+              <div className="flex-1 space-y-2">
+                <h3 className="text-white font-black tracking-widest uppercase text-[10px] opacity-40">¿Tienes un código?</h3>
                 <input
                   type="text"
-                  placeholder="Código de Invitación"
+                  placeholder="INGRESA EL CÓDIGO AQUÍ..."
+                  className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center text-lg tracking-[0.4em] placeholder:tracking-normal placeholder:font-normal placeholder:opacity-20 uppercase outline-none focus:border-indigo-500/50 transition-all"
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value)}
-                  className="flex-1 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-blue-400 focus:outline-none text-center uppercase font-bold tracking-widest"
                 />
-                <button
-                  onClick={joinByCode}
-                  className="px-6 py-3 bg-blue-500 text-white font-bold rounded-xl shadow-lg hover:bg-blue-400 transition-colors"
-                >
-                  Entrar
-                </button>
               </div>
+              <button
+                onClick={joinByCode}
+                className="w-full md:w-auto px-12 py-5 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-500 shadow-xl transition-all"
+              >
+                ENTRAR
+              </button>
             </div>
           </div>
         )}
 
-        {status === 'searching' && (
-          <div className="flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
-            <Loader text="Buscando una persona increíble..." />
+        {/* State: Searching & Joining */}
+        {(status === 'searching' || status === 'joining') && (
+          <div className="flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-500">
+            <Loader text={status === 'searching' ? "Buscando alguien increíble..." : "Validando código de sala..."} />
             <button
               onClick={leave}
-              className="px-6 py-2 bg-white/10 text-white/80 border border-white/20 rounded-full hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-all font-bold text-sm tracking-widest uppercase"
-            >
-              Cancelar Búsqueda
-            </button>
-          </div>
-        )}
-        {status === 'joining' && (
-          <div className="flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
-            <Loader text="Uniéndose a la sala..." />
-            <button
-              onClick={leave}
-              className="px-6 py-2 bg-white/10 text-white/80 border border-white/20 rounded-full hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-all font-bold text-sm tracking-widest uppercase"
+              className="px-8 py-3 bg-red-500/10 text-red-500 font-black rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all uppercase text-xs tracking-widest shadow-xl"
             >
               Cancelar
             </button>
           </div>
         )}
 
+        {/* State: Waiting Private (Created) */}
         {status === 'waiting-private' && (
-          <div className="text-center space-y-8 bg-white/10 backdrop-blur-xl p-10 rounded-3xl border border-white/20 shadow-2xl animate-in fade-in zoom-in duration-500 max-w-md w-full">
-            <div className="space-y-2">
-              <h3 className="text-3xl font-extrabold text-white">
-                Sala Privada 🎉
-              </h3>
-              <p className="text-blue-100 opacity-80">
-                Comparte el código con tus amigos:
-              </p>
+          <div className="max-w-md w-full bg-[#121216] backdrop-blur-3xl p-10 rounded-[48px] border border-white/10 shadow-3xl text-center space-y-8 animate-in fade-in zoom-in duration-500">
+            <div className="space-y-3">
+              <div className="w-20 h-20 bg-indigo-500/20 rounded-3xl flex items-center justify-center mx-auto border border-indigo-500/30">
+                <FiKey className="text-indigo-400 text-3xl" />
+              </div>
+              <h2 className="text-2xl font-black text-white tracking-tight">Sala Creada con Éxito</h2>
+              <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em] px-8">Comparte este código para que se unan a la charla</p>
             </div>
 
-            <div className="flex flex-col gap-4">
-              <div className="flex justify-center items-center gap-3">
-                <span className="bg-white/10 border border-white/30 text-2xl font-black text-white px-8 py-3 rounded-2xl shadow-inner tracking-widest">
+            <div className="space-y-4">
+              <div
+                onClick={copyCode}
+                className="cursor-pointer group relative bg-black/40 rounded-[28px] py-6 border border-white/10 hover:border-indigo-500/50 transition-all"
+              >
+                <span className="text-3xl font-black text-white tracking-[0.5em] pl-[0.5em]">
                   {createdCode}
                 </span>
-                <button
-                  onClick={copyCode}
-                  className="p-4 bg-white text-indigo-600 rounded-2xl hover:bg-indigo-50 shadow-lg transition-transform hover:scale-110 active:scale-95"
-                  title="Copiar Código"
-                >
-                  <FiCopy className="text-xl" />
-                </button>
+                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-indigo-600 p-2 rounded-xl">
+                  <FiCopy className="text-white text-xs" />
+                </div>
               </div>
-              <p className="text-xs font-bold text-white/40 uppercase tracking-widest">Esperando compañero...</p>
-            </div>
-
-            <div className="pt-4 space-y-6">
-              <Loader text="Generando conexión..." />
               <button
-                onClick={leave}
-                className="px-8 py-3 bg-red-500/20 text-red-100 border border-red-500/40 rounded-xl hover:bg-red-500 hover:text-white transition-all font-bold text-sm tracking-widest uppercase w-full shadow-lg"
+                onClick={copyCode}
+                className="w-full flex items-center justify-center gap-2 text-indigo-400 font-black text-[10px] uppercase tracking-widest hover:text-indigo-300"
               >
-                Cancelar y Salir
+                Haga clic para copiar código
               </button>
             </div>
+
+            <button
+              onClick={leave}
+              className="w-full py-4 bg-white/5 text-white/40 border border-white/5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all"
+            >
+              Cerrar y Salir
+            </button>
           </div>
         )}
 
-
+        {/* State: Matched (Video + Chat) */}
         {status === 'matched' && (
-          <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-4 lg:gap-8 mt-4 lg:mt-8 px-2 sm:px-6 h-full pb-8">
-            {/* Video: Protagonista en móvil (altura fija pero flexible) */}
-            <div className="flex-none lg:flex-1 h-[300px] sm:h-[450px] lg:h-[600px] relative">
+          <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-6 h-full min-h-0 pt-4 px-2 pb-10">
+            {/* Video Container (Protagonista) */}
+            <div className="flex-1 min-h-[320px] sm:min-h-[400px] lg:h-[700px] bg-black/20 rounded-[48px] relative overflow-hidden ring-1 ring-white/10 shadow-2xl">
               <VideoChat roomId={roomId} />
             </div>
 
-            {/* Chat: Abajo en móvil, lateral en PC */}
-            <div className="flex-none w-full lg:w-[420px] h-[350px] sm:h-[450px] lg:h-[600px] relative">
+            {/* Chat Container (Lateral o Inferior) */}
+            <div className="flex-none w-full lg:w-[450px] h-[450px] sm:h-[500px] lg:h-[700px] relative">
               <ChatBox roomId={roomId} onLeave={leave} />
             </div>
           </div>
         )}
 
-
       </main>
 
-      {/* Modern Modal replacement for alerts */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -286,11 +253,6 @@ export default function Dashboard() {
         message={modalConfig.message}
         type={modalConfig.type}
       />
-
-      <footer className="relative z-10 py-4 text-center text-gray-500 text-sm bg-white shadow-inner">
-        &copy; 2025 Jandolive. Todos los derechos reservados.
-      </footer>
     </div>
   );
 }
-

@@ -18,65 +18,25 @@ export default function ChatBox({ roomId, onLeave }) {
     }
 
     const handleMessage = (msg) => {
-      console.log('Received message:', msg);
       const safeMsg = {
         ...msg,
-        id:
-          msg.id ||
-          `${msg.from || 'anon'}-${Date.now()}-${Math.random()
-            .toString(36)
-            .slice(2, 7)}`,
+        id: msg.id || `${msg.from || 'anon'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         timestamp: msg.timestamp || Date.now(),
       };
 
       setMessages((prev) => {
-        if (
-          prev.some(
-            (x) =>
-              x.id === safeMsg.id ||
-              (x.from === safeMsg.from && x.text === safeMsg.text && x.timestamp === safeMsg.timestamp)
-          )
-        ) {
-          console.log('Duplicate message filtered:', safeMsg);
-          return prev;
-        }
-        return [...prev, safeMsg].slice(-100); 
+        if (prev.some((x) => x.id === safeMsg.id)) return prev;
+        return [...prev, safeMsg].slice(-100);
       });
     };
 
-    const handleConnect = () => {
-      console.log('Socket connected:', socket.id);
-      setConnectionError(null);
-      socket.emit('join-room', roomId);
-      console.log('Joined room:', roomId);
-    };
-
-    const handleDisconnect = () => {
-      console.log('Socket disconnected');
-      setConnectionError('Desconectado del servidor');
-    };
-
-    const handleConnectError = (err) => {
-      console.error('Socket connection error:', err);
-      setConnectionError('Error de conexión al servidor');
-    };
-
     socket.on('chat-message', handleMessage);
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('connect_error', handleConnectError);
-
-    if (!socket.connected) socket.connect();
 
     return () => {
       socket.off('chat-message', handleMessage);
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('connect_error', handleConnectError);
-      socket.emit('leave-room', roomId);
-      console.log('Left room:', roomId);
     };
   }, [roomId]);
+
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -106,7 +66,7 @@ export default function ChatBox({ roomId, onLeave }) {
 
   const drag = useRef(null);
   const startDrag = (e) => {
-    if (e.target.closest('button, input')) return; 
+    if (e.target.closest('button, input')) return;
     drag.current = {
       offsetX: e.clientX - containerRef.current.offsetLeft,
       offsetY: e.clientY - containerRef.current.offsetTop,
@@ -138,7 +98,7 @@ export default function ChatBox({ roomId, onLeave }) {
   return (
     <div
       ref={containerRef}
-      className="border border-gray-200 rounded-2xl shadow-xl p-6 bg-white flex flex-col w-96 absolute top-4 right-4 cursor-move transition-all duration-300"
+      className="border border-white/20 rounded-[32px] shadow-2xl p-6 bg-white/10 backdrop-blur-xl flex flex-col w-full h-[600px] relative overflow-hidden animate-in slide-in-from-right-8 duration-500"
       onMouseDown={startDrag}
     >
       <div className="flex items-center gap-2 mb-4 border-b border-gray-200 pb-2">
@@ -167,11 +127,10 @@ export default function ChatBox({ roomId, onLeave }) {
                 </span>
               )}
               <div
-                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm text-sm leading-relaxed ${
-                  isMine
-                    ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-br-none'
-                    : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none'
-                }`}
+                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm text-sm leading-relaxed ${isMine
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-br-none'
+                  : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none'
+                  }`}
                 title={`Enviado a las ${formatTime(m.timestamp)}`}
               >
                 <p className="whitespace-pre-wrap break-words">{m.text}</p>

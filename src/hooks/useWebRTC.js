@@ -8,7 +8,7 @@ export default function useWebRTC(socket, roomId) {
   const [error, setError] = useState(null);
 
   const peerConnection = useRef(null);
-  const tracksAdded = useRef(false); // <- NUEVO: para evitar añadir tracks duplicados
+  const tracksAdded = useRef(false); 
 
   const startMedia = async (video = false, audio = false) => {
     if (!video && !audio) return;
@@ -24,7 +24,7 @@ export default function useWebRTC(socket, roomId) {
 
       if (peerConnection.current && !tracksAdded.current) {
         stream.getTracks().forEach(track => peerConnection.current.addTrack(track, stream));
-        tracksAdded.current = true; // <-- marcar como añadidos
+        tracksAdded.current = true; 
       }
     } catch (err) {
       console.error('WebRTC error:', err);
@@ -51,7 +51,6 @@ export default function useWebRTC(socket, roomId) {
     }
   };
 
-  // Crear PeerConnection solo una vez
   useEffect(() => {
     if (!socket || !roomId) return;
 
@@ -75,7 +74,6 @@ export default function useWebRTC(socket, roomId) {
     };
   }, [socket, roomId]);
 
-  // Crear oferta solo después de tener tracks locales
   useEffect(() => {
     if (!peerConnection.current || !localStream || !tracksAdded.current) return;
 
@@ -90,7 +88,7 @@ export default function useWebRTC(socket, roomId) {
     })();
   }, [localStream, socket, roomId]);
 
-  // Manejo de offer/answer/ICE
+  
   useEffect(() => {
     if (!socket) return;
 

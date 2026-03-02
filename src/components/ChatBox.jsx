@@ -1,207 +1,97 @@
-
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { socket } from '../services/socket';
-import { FiSend, FiRefreshCw, FiMessageCircle, FiAlertCircle } from 'react-icons/fi';
+import { FiSend, FiUser, FiGlobe } from 'react-icons/fi';
 
 export default function ChatBox({ roomId, onLeave }) {
+  const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]);
-  const [text, setText] = useState('');
-  const [connectionError, setConnectionError] = useState(null);
-  const endRef = useRef();
-  const containerRef = useRef();
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
-    if (!socket) {
-      setConnectionError('Socket no inicializado');
-      console.error('Socket not initialized');
-      return;
-    }
+    scrollToBottom();
+  }, [messages]);
 
+  useEffect(() => {
     const handleMessage = (msg) => {
-      const safeMsg = {
-        ...msg,
-        id: msg.id || `${msg.from || 'anon'}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        timestamp: msg.timestamp || Date.now(),
-      };
-
-      setMessages((prev) => {
-        if (prev.some((x) => x.id === safeMsg.id)) return prev;
-        return [...prev, safeMsg].slice(-100);
-      });
+      setMessages((prev) => [...prev, msg]);
     };
 
     socket.on('chat-message', handleMessage);
+    return () => socket.off('chat-message', handleMessage);
+  }, []);
 
-    return () => {
-      socket.off('chat-message', handleMessage);
-    };
-  }, [roomId]);
-
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  const send = useCallback(() => {
-    if (!text.trim()) return;
-    if (!socket.connected) {
-      setConnectionError('No conectado al servidor');
-      return;
+  const sendMessage = (e) => {
+    if (e) e.preventDefault();
+    if (input.trim()) {
+      const msg = { text: input, fromMe: true, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+      socket.emit('chat-message', { roomId, message: input });
+      setMessages((prev) => [...prev, msg]);
+      setInput('');
     }
-    const message = {
-      roomId,
-      text,
-      id: `${socket.id}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      from: socket.id,
-      timestamp: Date.now(),
-    };
-    console.log('Sending message:', message);
-    socket.emit('chat-message', message);
-    setText('');
-  }, [text, roomId]);
-
-  const handleKey = (e) => {
-    if (e.key === 'Enter') send();
-  };
-
-  const drag = useRef(null);
-  const startDrag = (e) => {
-    if (e.target.closest('button, input')) return;
-    drag.current = {
-      offsetX: e.clientX - containerRef.current.offsetLeft,
-      offsetY: e.clientY - containerRef.current.offsetTop,
-    };
-    document.addEventListener('mousemove', onDrag);
-    document.addEventListener('mouseup', stopDrag);
-  };
-
-  const onDrag = (e) => {
-    if (!drag.current) return;
-    containerRef.current.style.left = `${e.clientX - drag.current.offsetX}px`;
-    containerRef.current.style.top = `${e.clientY - drag.current.offsetY}px`;
-  };
-
-  const stopDrag = () => {
-    drag.current = null;
-    document.removeEventListener('mousemove', onDrag);
-    document.removeEventListener('mouseup', stopDrag);
-  };
-
-  const formatTime = (timestamp) => {
-    const d = new Date(timestamp);
-    return `${d.getHours().toString().padStart(2, '0')}:${d
-      .getMinutes()
-      .toString()
-      .padStart(2, '0')}`;
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="border border-white/20 rounded-[32px] shadow-2xl p-6 bg-white/10 backdrop-blur-xl flex flex-col w-full h-[600px] relative overflow-hidden animate-in slide-in-from-right-8 duration-500"
-      onMouseDown={startDrag}
-    >
-      <div className="flex items-center gap-2 mb-4 border-b border-gray-200 pb-2">
-        <FiMessageCircle className="text-blue-600 text-xl" />
-        <h2 className="text-lg font-semibold text-gray-800">Chat en vivo</h2>
-        {connectionError && (
-          <FiAlertCircle className="text-red-500 text-xl ml-auto" title={connectionError} />
-        )}
-      </div>
-
-      <div className="flex-1 max-h-80 overflow-y-auto mb-4 bg-gradient-to-b from-gray-50 to-gray-100 rounded-xl p-4 space-y-3 scrollbar-thin scrollbar-thumb-gray-300">
-        {messages.map((m, idx) => {
-          const isMine = m.from === socket.id;
-          const prevMsg = idx > 0 ? messages[idx - 1] : null;
-          const showSender = !prevMsg || prevMsg.from !== m.from;
-          return (
-            <div
-              key={m.id}
-              className={`flex flex-col ${isMine ? 'items-end' : 'items-start'} animate-slideIn`}
-            >
-              {showSender && (
-                <span
-                  className={`text-[11px] mb-1 ${isMine ? 'text-blue-400' : 'text-gray-500'}`}
-                >
-                  {isMine ? 'Tú' : m.from !== socket.id ? m.from : 'Contacto'}
-                </span>
-              )}
-              <div
-                className={`max-w-[70%] px-4 py-2 rounded-2xl shadow-sm text-sm leading-relaxed ${isMine
-                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-br-none'
-                  : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none'
-                  }`}
-                title={`Enviado a las ${formatTime(m.timestamp)}`}
-              >
-                <p className="whitespace-pre-wrap break-words">{m.text}</p>
-              </div>
-              <span
-                className={`text-[10px] mt-1 ${isMine ? 'text-blue-400' : 'text-gray-500'}`}
-              >
-                {formatTime(m.timestamp)}
-              </span>
-            </div>
-          );
-        })}
-        <div ref={endRef} />
-      </div>
-
-      <div className="flex gap-3 items-center">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={handleKey}
-          className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-          placeholder="Escribe tu mensaje..."
-          disabled={!!connectionError}
-        />
-        <button
-          onClick={send}
-          className="p-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 shadow-md hover:shadow-lg transition flex items-center justify-center disabled:bg-gray-400"
-          title="Enviar mensaje"
-          disabled={!!connectionError}
-        >
-          <FiSend size={18} />
-        </button>
-      </div>
-
-      <div className="mt-4 flex justify-end">
+    <div className="flex flex-col h-full bg-white/10 backdrop-blur-xl rounded-[32px] border border-white/20 shadow-2xl overflow-hidden animate-in fade-in slide-in-from-right-8 duration-700">
+      {/* Header Chat */}
+      <div className="px-6 py-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/20 rounded-lg">
+            <FiGlobe className="text-indigo-400" />
+          </div>
+          <div>
+            <h3 className="text-white font-bold text-sm">Chat en Vivo</h3>
+            <p className="text-white/40 text-[10px] uppercase tracking-widest font-black">Conexión Segura</p>
+          </div>
+        </div>
         <button
           onClick={onLeave}
-          className="px-5 py-2 bg-green-500 text-white rounded-xl shadow-md hover:bg-green-600 hover:scale-105 transition-transform flex items-center gap-2"
+          className="px-4 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all shadow-lg"
         >
-          <FiRefreshCw size={18} />
-          <span>Siguiente</span>
+          Salir
         </button>
       </div>
 
-      <style jsx>{`
-        @keyframes slideIn {
-          from {
-            opacity: 0;
-            transform: translateY(10px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-slideIn {
-          animation: slideIn 0.2s ease-out;
-        }
-        .scrollbar-thin {
-          scrollbar-width: thin;
-        }
-        .scrollbar-thumb-gray-300::-webkit-scrollbar {
-          width: 8px;
-        }
-        .scrollbar-thumb-gray-300::-webkit-scrollbar-thumb {
-          background-color: #d1d5db;
-          border-radius: 4px;
-        }
-      `}</style>
+      {/* Mensajes */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center opacity-30 space-y-2">
+            <FiUser size={40} className="text-white" />
+            <p className="text-white text-xs font-bold uppercase tracking-widest">Di hola para empezar...</p>
+          </div>
+        ) : (
+          messages.map((msg, idx) => (
+            <div key={idx} className={`flex flex-col ${msg.fromMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+              <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${msg.fromMe ? 'bg-indigo-600 text-white rounded-tr-none shadow-indigo-500/20' : 'bg-white/10 text-blue-100 border border-white/10 rounded-tl-none shadow-black/10 shadow-lg'}`}>
+                {msg.text}
+              </div>
+              <span className="text-[10px] text-white/30 font-bold mt-1 uppercase px-1">{msg.time}</span>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Formulario de Envío - Optimizado para móvil */}
+      <form onSubmit={sendMessage} className="p-4 bg-white/5 border-t border-white/10 flex gap-2 items-center">
+        <input
+          type="text"
+          placeholder="Escribe un mensaje..."
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-5 py-3 text-white placeholder-white/40 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-base"
+        />
+        <button
+          type="submit"
+          className="p-4 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-500 active:scale-95 transition-all shadow-xl flex items-center justify-center min-w-[56px] shadow-indigo-600/30"
+          title="Enviar Mensaje"
+        >
+          <FiSend className="text-xl" />
+        </button>
+      </form>
     </div>
   );
 }
-
-

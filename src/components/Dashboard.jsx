@@ -47,11 +47,20 @@ export default function Dashboard() {
       showAlert('Error del Servidor', msg, 'error');
       setStatus('idle');
     });
-    socket.on('peer-left', () => {
+    socket.on('call-ended', () => {
+      // 🚨 Este evento solo llega si la sala realmente se vació (quedaban 2 o menos)
       setStatus('idle');
       setRoomId(null);
       setCreatedCode(null);
+      showAlert('Llamada Finalizada', 'La otra persona se ha ido o se ha cerrado la sala.', 'info');
     });
+
+    socket.on('peer-left', ({ socketId }) => {
+      // En grupos, esto NO debe sacarte del Dashboard
+      console.log(`👤 El usuario ${socketId} ha salido de la llamada.`);
+      // VideoChat se encarga de quitar el video automáticamente
+    });
+
 
     return () => {
       socket.off('connect');
@@ -253,18 +262,19 @@ export default function Dashboard() {
 
 
         {status === 'matched' && (
-          <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-6 mt-2 lg:mt-6 px-2 sm:px-4 h-full">
-            {/* Contenedor de Video: Altura ajustable según pantalla */}
-            <div className="flex-1 min-h-[350px] lg:h-[600px] relative">
+          <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-4 lg:gap-8 mt-4 lg:mt-8 px-2 sm:px-6 h-full pb-8">
+            {/* Video: Protagonista en móvil (altura fija pero flexible) */}
+            <div className="flex-none lg:flex-1 h-[300px] sm:h-[450px] lg:h-[600px] relative">
               <VideoChat roomId={roomId} />
             </div>
 
-            {/* Contenedor de Chat: Ancho fijo en PC, completo en móvil */}
-            <div className="w-full lg:w-[400px] min-h-[400px] lg:h-[600px] relative">
+            {/* Chat: Abajo en móvil, lateral en PC */}
+            <div className="flex-none w-full lg:w-[420px] h-[350px] sm:h-[450px] lg:h-[600px] relative">
               <ChatBox roomId={roomId} onLeave={leave} />
             </div>
           </div>
         )}
+
 
       </main>
 

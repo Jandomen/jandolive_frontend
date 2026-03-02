@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [roomId, setRoomId] = useState(null);
   const [joinCode, setJoinCode] = useState('');
   const [createdCode, setCreatedCode] = useState(null);
+  const [others, setOthers] = useState([]); // Lista inicial de participantes para VideoChat
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,22 +22,39 @@ export default function Dashboard() {
     connectSocket();
 
     socket.on('connect', () => console.log('✅ Socket connected:', socket.id));
-    socket.on('joined-room', ({ roomId: rid }) => {
+
+    socket.on('waiting', () => setStatus('searching'));
+
+    socket.on('matched', ({ roomId: rid }) => {
+      console.log('🎯 matched in room:', rid);
       setRoomId(rid);
+      setOthers([]); // En random usualmente empezamos de 0 o el otro ya está
       setStatus('matched');
     });
+
+    socket.on('joined-room', ({ roomId: rid, others: o }) => {
+      setRoomId(rid);
+      setOthers(o || []);
+      setStatus('matched');
+    });
+
     socket.on('private-room-created', ({ roomId: rid }) => {
       setCreatedCode(rid);
       setStatus('waiting-private');
     });
-    socket.on('user-joined', () => {
+
+    socket.on('user-joined', ({ socketId }) => {
+      console.log('👤 Alguien se unió:', socketId);
       setStatus('matched');
     });
+
+
     socket.on('error', (msg) => {
       console.warn('⚠️ Server error:', msg);
       showAlert('Error del Servidor', msg, 'error');
       setStatus('idle');
     });
+
     socket.on('call-ended', () => {
       leave();
       showAlert('Llamada Finalizada', 'La otra persona se ha ido.', 'info');
@@ -44,6 +62,8 @@ export default function Dashboard() {
 
     return () => {
       socket.off('connect');
+      socket.off('waiting');
+      socket.off('matched');
       socket.off('joined-room');
       socket.off('private-room-created');
       socket.off('user-joined');
@@ -52,6 +72,7 @@ export default function Dashboard() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
 
   const showAlert = (title, message, type = 'info') => {
     setModalConfig({ title, message, type });
@@ -103,10 +124,7 @@ export default function Dashboard() {
           <div className="w-4 h-4 rounded-full bg-red-600 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]"></div>
           <h1 className="text-2xl font-black text-white tracking-widest text-shadow-glow">JANDOLIVE</h1>
         </div>
-        <div className="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10 shrink-0">
-          <span className="text-white/40 font-black text-[10px] uppercase tracking-widest hidden sm:inline">Online</span>
-          <span className="text-white font-black text-xs">© {new Date().getFullYear()}</span>
-        </div>
+
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 pt-32 pb-12 w-full max-w-screen-2xl mx-auto overflow-y-auto">
@@ -236,7 +254,7 @@ export default function Dashboard() {
           <div className="w-full max-w-7xl flex flex-col lg:flex-row gap-6 h-full min-h-0 pt-4 px-2 pb-10">
             {/* Video Container (Protagonista) */}
             <div className="flex-1 min-h-[320px] sm:min-h-[400px] lg:h-[700px] bg-black/20 rounded-[48px] relative overflow-hidden ring-1 ring-white/10 shadow-2xl">
-              <VideoChat roomId={roomId} />
+              <VideoChat roomId={roomId} others={others} />
             </div>
 
             {/* Chat Container (Lateral o Inferior) */}

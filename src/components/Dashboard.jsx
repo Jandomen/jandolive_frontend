@@ -41,8 +41,11 @@ export default function Dashboard() {
 
     socket.on('private-room-created', ({ roomId: rid }) => {
       setCreatedCode(rid);
+      setRoomId(rid); // FUNDAMENTAL para que VideoChat se monte luego con el ID
+      setOthers([]); // La empezamos vacía
       setStatus('waiting-private');
     });
+
 
     socket.on('user-joined', ({ socketId }) => {
       console.log('👤 Alguien se unió:', socketId);

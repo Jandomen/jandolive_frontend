@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { socket } from '../services/socket';
-import { FiMonitor, FiVideo, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiMonitor, FiVideo, FiChevronLeft, FiChevronRight, FiSkipForward } from 'react-icons/fi';
 
 const configuration = {
   iceServers: [
@@ -17,9 +17,10 @@ export default function VideoChat({ roomId, others = [] }) {
   const [remoteStreams, setRemoteStreams] = useState({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
-  const peersRef = useRef({}); // { socketId: RTCPeerConnection }
-  const initiatedRef = useRef(new Set()); // Para no mandar ofertas dobles
+  const peersRef = useRef({});
+  const initiatedRef = useRef(new Set());
 
+  const [localReady, setLocalReady] = useState(false);
   const roomIdRef = useRef(roomId);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
 
@@ -35,7 +36,6 @@ export default function VideoChat({ roomId, others = [] }) {
     setCurrentIndex((prev) => (prev - 1 + total) % total);
   };
 
-  // 📹 Inicialización del stream local. Nunca se desmonta mientras la sala exista.
   useEffect(() => {
     const initLocalMedia = async () => {
       try {
@@ -43,6 +43,7 @@ export default function VideoChat({ roomId, others = [] }) {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
           localStreamRef.current = stream;
           if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+          setLocalReady(true);
         }
       } catch (err) {
         console.error("❌ Error inicializando cámara local:", err);
@@ -61,12 +62,10 @@ export default function VideoChat({ roomId, others = [] }) {
   const createPeer = async (socketId, senderOffer = false) => {
     const currentRoom = roomIdRef.current;
     if (!currentRoom) return null;
-
     if (peersRef.current[socketId]) return peersRef.current[socketId];
 
     const peer = new RTCPeerConnection(configuration);
 
-    // Si tenemos cámara local, la añadimos al flujo
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
         peer.addTrack(track, localStreamRef.current);
@@ -99,11 +98,10 @@ export default function VideoChat({ roomId, others = [] }) {
     return peer;
   };
 
-  // 🌍 Eventos de Socket.io registrados SOLO UNA VEZ. Usan roomIdRef para no quedarse obsoletos.
   useEffect(() => {
     const onUserJoined = ({ socketId }) => {
-      console.log("🚀 Nuevo participante detectado (esperando su oferta):", socketId);
-      createPeer(socketId, false); // No mandamos oferta, él nos la mandará
+      console.log("🚀 Nuevo participante detectado:", socketId);
+      createPeer(socketId, false);
     };
 
     const onOffer = async ({ offer, from }) => {
@@ -115,6 +113,9 @@ export default function VideoChat({ roomId, others = [] }) {
       if (!peer) return;
 
       try {
+        if (peer.signalingState !== "stable") {
+          await peer.setLocalDescription({ type: "rollback" });
+        }
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
@@ -125,7 +126,6 @@ export default function VideoChat({ roomId, others = [] }) {
     };
 
     const onAnswer = async ({ answer, from }) => {
-      console.log("✅ Respuesta recibida de:", from);
       const peer = peersRef.current[from];
       if (peer) {
         try {
@@ -141,14 +141,11 @@ export default function VideoChat({ roomId, others = [] }) {
       if (peer && candidate) {
         try {
           await peer.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          // Si falla, es normal en algunos flujos de ICE trickle
-        }
+        } catch (e) { }
       }
     };
 
     const onPeerLeft = ({ socketId }) => {
-      console.log("👋 Participante salió:", socketId);
       if (peersRef.current[socketId]) {
         peersRef.current[socketId].close();
         delete peersRef.current[socketId];
@@ -174,13 +171,10 @@ export default function VideoChat({ roomId, others = [] }) {
       socket.off('ice-candidate', onIceCandidate);
       socket.off('peer-left', onPeerLeft);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // <-- Hook vacío, se ejecuta solo al montar. Las refs mantienen los datos vivos.
+  }, []);
 
-  // 🔥 Lanzar ofertas si somos nosotros los recién llegados ('others' vienen en el login)
   useEffect(() => {
     if (!roomId) {
-      // Limpieza si el componente sigue vivo pero el roomId se borra (ej. salir al dashboard)
       Object.keys(peersRef.current).forEach(sid => {
         peersRef.current[sid].close();
         delete peersRef.current[sid];
@@ -190,17 +184,20 @@ export default function VideoChat({ roomId, others = [] }) {
       return;
     }
 
-    if (others && others.length > 0) {
-      others.forEach(sid => {
-        if (sid !== socket.id && !initiatedRef.current.has(sid)) {
-          initiatedRef.current.add(sid);
-          console.log("📨 Iniciando oferta proactiva a (Yo soy nuevo):", sid);
-          createPeer(sid, true); // Sí iniciamos nosotros
-        }
-      });
+    if (others && others.length > 0 && localReady) {
+      // Timeout para evitar condiciones de carrera en el montaje del otro lado
+      const timer = setTimeout(() => {
+        others.forEach(sid => {
+          if (sid !== socket.id && !initiatedRef.current.has(sid)) {
+            initiatedRef.current.add(sid);
+            console.log("📨 Iniciando oferta proactiva tras espera:", sid);
+            createPeer(sid, true);
+          }
+        });
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, others]);
+  }, [roomId, others, localReady]);
 
   const toggleScreenShare = async () => {
     try {
@@ -234,9 +231,11 @@ export default function VideoChat({ roomId, others = [] }) {
     setIsSharingScreen(false);
   };
 
-  const streamsArray = Object.entries(remoteStreams);
+  const handleNext = () => {
+    socket.emit('ready');
+  };
 
-  // Saber si es sala privada vs aleatoria (por si la roomId no es room-X)
+  const streamsArray = Object.entries(remoteStreams);
   const isPrivateRoom = roomId && !roomId.startsWith('room-');
 
   return (
@@ -250,6 +249,15 @@ export default function VideoChat({ roomId, others = [] }) {
           {isSharingScreen ? <FiVideo className="text-sm" /> : <FiMonitor className="text-sm" />}
           {isSharingScreen ? 'Detener Pantalla' : 'Compartir Pantalla'}
         </button>
+
+        {!isPrivateRoom && (
+          <button
+            onClick={handleNext}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-indigo-600 text-white font-black text-[9px] uppercase tracking-[0.2em] hover:bg-indigo-500 hover:translate-y-[-2px] transition-all shadow-xl active:scale-95 border border-white/20"
+          >
+            <FiSkipForward className="text-sm" /> Siguiente
+          </button>
+        )}
       </div>
 
       {isPrivateRoom && (
@@ -265,12 +273,12 @@ export default function VideoChat({ roomId, others = [] }) {
               <div className="absolute inset-0 rounded-full shadow-[0_0_20px_#6366f1] animate-pulse"></div>
             </div>
             <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">
-              {roomId ? `Esperando amigos en la sala ${isPrivateRoom ? roomId : ''}...` : "Inicializando cámara..."}
+              {isPrivateRoom ? `Esperando amigos en la sala ${roomId}...` : "Buscando alguien nuevo..."}
             </p>
           </div>
         ) : (
           <div className="relative w-full h-full flex items-center justify-center p-6 sm:p-8">
-            <div className="hidden lg:grid lg:grid-cols-2 gap-5 w-full h-full">
+            <div className="hidden lg:grid lg:grid-cols-2 gap-5 w-full h-full text-white">
               {streamsArray.map(([id, stream]) => (
                 <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl">
                   <video autoPlay playsInline muted={false} ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
@@ -301,7 +309,6 @@ export default function VideoChat({ roomId, others = [] }) {
               )}
             </div>
           </div>
-
         )}
       </div>
 

@@ -5,6 +5,7 @@ import Loader from './Loader';
 import VideoChat from './VideoChat';
 import { FiCircle, FiUsers, FiKey, FiCopy } from 'react-icons/fi';
 import Modal from './Modal';
+import Footer from './Footer';
 
 export default function Dashboard() {
   const [status, setStatus] = useState('idle'); // idle, searching, joining, matched, waiting-private
@@ -52,7 +53,6 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
   const showAlert = (title, message, type = 'info') => {
     setModalConfig({ title, message, type });
     setIsModalOpen(true);
@@ -78,7 +78,7 @@ export default function Dashboard() {
   };
 
   const leave = () => {
-    if (roomId || createdCode) {
+    if (status === 'matched' || roomId || createdCode) {
       socket.emit('leave', { roomId: roomId || createdCode });
     }
     // 🧹 Limpieza TOTAL de estados para evitar re-carga de página
@@ -101,7 +101,7 @@ export default function Dashboard() {
       <header className="fixed top-0 w-full z-50 bg-[#0a0a0c]/80 backdrop-blur-xl border-b border-white/5 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-4 h-4 rounded-full bg-red-600 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]"></div>
-          <h1 className="text-2xl font-black text-white tracking-widest">JANDOLIVE</h1>
+          <h1 className="text-2xl font-black text-white tracking-widest text-shadow-glow">JANDOLIVE</h1>
         </div>
         <div className="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10 shrink-0">
           <span className="text-white/40 font-black text-[10px] uppercase tracking-widest hidden sm:inline">Online</span>
@@ -109,21 +109,21 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-4 pt-24 pb-8 w-full max-w-screen-2xl mx-auto overflow-y-auto">
+      <main className="flex-1 flex flex-col items-center justify-center p-4 pt-32 pb-12 w-full max-w-screen-2xl mx-auto overflow-y-auto">
 
         {/* State: IDLE (Menú Principal) */}
         {status === 'idle' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full max-w-4xl animate-in fade-in slide-in-from-bottom-12 duration-700">
             {/* Opción 1: Random */}
             <div className="group relative bg-[#121216] backdrop-blur-3xl p-10 rounded-[40px] border border-white/10 shadow-3xl hover:border-indigo-500/50 transition-all duration-500 overflow-hidden">
-              <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-700">
+              <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform duration-700 pointer-events-none">
                 <FiCircle size={150} />
               </div>
               <h2 className="text-3xl font-black text-white mb-4">Chat Aleatorio</h2>
               <p className="text-white/50 mb-8 font-medium">Conoce gente nueva al instante en un video 1 a 1 de forma segura.</p>
               <button
                 onClick={startSearching}
-                className="w-full bg-indigo-600 text-white font-black py-5 rounded-[24px] shadow-2xl hover:bg-indigo-500 active:scale-95 transition-all tracking-widest uppercase text-xs"
+                className="w-full relative z-10 bg-indigo-600 text-white font-black py-5 rounded-[24px] shadow-2xl hover:bg-indigo-500 active:scale-95 transition-all tracking-widest uppercase text-xs"
               >
                 Empezar Búsqueda
               </button>
@@ -158,7 +158,7 @@ export default function Dashboard() {
 
             {/* Unirse por código */}
             <div className="md:col-span-2 bg-white/5 backdrop-blur-md p-8 rounded-[36px] border border-white/10 shadow-xl flex flex-col md:flex-row items-center gap-6">
-              <div className="flex-1 space-y-2">
+              <div className="flex-1 space-y-2 w-full">
                 <h3 className="text-white font-black tracking-widest uppercase text-[10px] opacity-40">¿Tienes un código?</h3>
                 <input
                   type="text"
@@ -170,7 +170,7 @@ export default function Dashboard() {
               </div>
               <button
                 onClick={joinByCode}
-                className="w-full md:w-auto px-12 py-5 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-500 shadow-xl transition-all"
+                className="w-full md:w-auto px-12 py-5 bg-indigo-600 text-white font-black rounded-2xl hover:bg-indigo-500 shadow-xl transition-all active:scale-95"
               >
                 ENTRAR
               </button>
@@ -184,7 +184,7 @@ export default function Dashboard() {
             <Loader text={status === 'searching' ? "Buscando alguien increíble..." : "Validando código de sala..."} />
             <button
               onClick={leave}
-              className="px-8 py-3 bg-red-500/10 text-red-500 font-black rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all uppercase text-xs tracking-widest shadow-xl"
+              className="px-8 py-3 bg-red-500/10 text-red-500 font-black rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all uppercase text-xs tracking-widest shadow-xl active:scale-95"
             >
               Cancelar
             </button>
@@ -224,7 +224,7 @@ export default function Dashboard() {
 
             <button
               onClick={leave}
-              className="w-full py-4 bg-white/5 text-white/40 border border-white/5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all"
+              className="w-full py-4 bg-white/5 text-white/40 border border-white/5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all active:scale-95"
             >
               Cerrar y Salir
             </button>
@@ -247,6 +247,8 @@ export default function Dashboard() {
         )}
 
       </main>
+
+      <Footer />
 
       <Modal
         isOpen={isModalOpen}

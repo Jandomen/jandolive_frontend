@@ -200,7 +200,18 @@ export default function Dashboard() {
             </button>
           </div>
         )}
-        {status === 'joining' && <Loader text="Uniéndose a la sala..." />}
+        {status === 'joining' && (
+          <div className="flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
+            <Loader text="Uniéndose a la sala..." />
+            <button
+              onClick={leave}
+              className="px-6 py-2 bg-white/10 text-white/80 border border-white/20 rounded-full hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/50 transition-all font-bold text-sm tracking-widest uppercase"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+
         {status === 'waiting-private' && (
           <div className="text-center space-y-8 bg-white/10 backdrop-blur-xl p-10 rounded-3xl border border-white/20 shadow-2xl animate-in fade-in zoom-in duration-500 max-w-md w-full">
             <div className="space-y-2">

@@ -18,6 +18,10 @@ export default function VideoChat({ roomId, others = [] }) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isSharingScreen, setIsSharingScreen] = useState(false);
   const peersRef = useRef({}); // { socketId: RTCPeerConnection }
+  const initiatedRef = useRef(new Set()); // Para no mandar ofertas dobles
+
+  const roomIdRef = useRef(roomId);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
 
   const nextPerson = () => {
     const total = Object.keys(remoteStreams).length;
@@ -31,7 +35,7 @@ export default function VideoChat({ roomId, others = [] }) {
     setCurrentIndex((prev) => (prev - 1 + total) % total);
   };
 
-  // 📹 Inicialización única del stream local
+  // 📹 Inicialización del stream local. Nunca se desmonta mientras la sala exista.
   useEffect(() => {
     const initLocalMedia = async () => {
       try {
@@ -54,103 +58,148 @@ export default function VideoChat({ roomId, others = [] }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (!roomId) return;
+  const createPeer = async (socketId, senderOffer = false) => {
+    const currentRoom = roomIdRef.current;
+    if (!currentRoom) return null;
 
-    const createPeer = async (socketId, senderOffer = false) => {
-      // Si ya existe una conexión activa, no crear otra
-      if (peersRef.current[socketId]) return peersRef.current[socketId];
+    if (peersRef.current[socketId]) return peersRef.current[socketId];
 
-      const peer = new RTCPeerConnection(configuration);
+    const peer = new RTCPeerConnection(configuration);
 
-      // Añadir tracks locales si existen
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => {
-          peer.addTrack(track, localStreamRef.current);
-        });
-      }
-
-      peer.onicecandidate = (e) => {
-        if (e.candidate) {
-          socket.emit('ice-candidate', { roomId, candidate: e.candidate, to: socketId });
-        }
-      };
-
-      peer.ontrack = (e) => {
-        console.log("🎬 Track remoto recibido de:", socketId);
-        setRemoteStreams((prev) => ({ ...prev, [socketId]: e.streams[0] }));
-      };
-
-      if (senderOffer) {
-        const offer = await peer.createOffer();
-        await peer.setLocalDescription(offer);
-        socket.emit('offer', { roomId, offer: peer.localDescription, to: socketId });
-      }
-
-      peersRef.current[socketId] = peer;
-      return peer;
-    };
-
-    // 🔥 Conexión inmediata con participantes existentes (others)
-    if (others.length > 0) {
-      others.forEach(sid => {
-        if (sid !== socket.id) {
-          console.log("📨 Iniciando oferta proactiva a:", sid);
-          createPeer(sid, true);
-        }
+    // Si tenemos cámara local, la añadimos al flujo
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        peer.addTrack(track, localStreamRef.current);
       });
     }
 
-    socket.on('user-joined', ({ socketId }) => {
-      console.log("🚀 Nuevo participante detectado:", socketId);
-      createPeer(socketId, true);
-    });
+    peer.onicecandidate = (e) => {
+      if (e.candidate) {
+        socket.emit('ice-candidate', { roomId: currentRoom, candidate: e.candidate, to: socketId });
+      }
+    };
 
-    socket.on('offer', async ({ offer, from }) => {
+    peer.ontrack = (e) => {
+      console.log("🎬 Track remoto recibido de:", socketId);
+      setRemoteStreams((prev) => ({ ...prev, [socketId]: e.streams[0] }));
+    };
+
+    peersRef.current[socketId] = peer;
+
+    if (senderOffer) {
+      try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit('offer', { roomId: currentRoom, offer: peer.localDescription, to: socketId });
+      } catch (err) {
+        console.error("Error creando oferta:", err);
+      }
+    }
+
+    return peer;
+  };
+
+  // 🌍 Eventos de Socket.io registrados SOLO UNA VEZ. Usan roomIdRef para no quedarse obsoletos.
+  useEffect(() => {
+    const onUserJoined = ({ socketId }) => {
+      console.log("🚀 Nuevo participante detectado (esperando su oferta):", socketId);
+      createPeer(socketId, false); // No mandamos oferta, él nos la mandará
+    };
+
+    const onOffer = async ({ offer, from }) => {
       console.log("📥 Oferta recibida de:", from);
+      const currentRoom = roomIdRef.current;
+      if (!currentRoom) return;
+
       const peer = await createPeer(from, false);
-      await peer.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peer.createAnswer();
-      await peer.setLocalDescription(answer);
-      socket.emit('answer', { roomId, answer, to: from });
-    });
+      if (!peer) return;
 
-    socket.on('answer', async ({ answer, from }) => {
+      try {
+        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit('answer', { roomId: currentRoom, answer, to: from });
+      } catch (e) {
+        console.error("Error al contestar oferta:", e);
+      }
+    };
+
+    const onAnswer = async ({ answer, from }) => {
+      console.log("✅ Respuesta recibida de:", from);
       const peer = peersRef.current[from];
-      if (peer) await peer.setRemoteDescription(new RTCSessionDescription(answer));
-    });
+      if (peer) {
+        try {
+          await peer.setRemoteDescription(new RTCSessionDescription(answer));
+        } catch (e) {
+          console.error("Error al aceptar respuesta:", e);
+        }
+      }
+    };
 
-    socket.on('ice-candidate', async ({ candidate, from }) => {
+    const onIceCandidate = async ({ candidate, from }) => {
       const peer = peersRef.current[from];
-      if (peer && candidate) await peer.addIceCandidate(new RTCIceCandidate(candidate));
-    });
+      if (peer && candidate) {
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(candidate));
+        } catch (e) {
+          // Si falla, es normal en algunos flujos de ICE trickle
+        }
+      }
+    };
 
-    socket.on('peer-left', ({ socketId }) => {
+    const onPeerLeft = ({ socketId }) => {
+      console.log("👋 Participante salió:", socketId);
       if (peersRef.current[socketId]) {
         peersRef.current[socketId].close();
         delete peersRef.current[socketId];
+        initiatedRef.current.delete(socketId);
         setRemoteStreams((prev) => {
           const next = { ...prev };
           delete next[socketId];
           return next;
         });
       }
-    });
+    };
 
-    const currentPeers = peersRef.current;
+    socket.on('user-joined', onUserJoined);
+    socket.on('offer', onOffer);
+    socket.on('answer', onAnswer);
+    socket.on('ice-candidate', onIceCandidate);
+    socket.on('peer-left', onPeerLeft);
+
     return () => {
-      socket.off('offer');
-      socket.off('answer');
-      socket.off('ice-candidate');
-      socket.off('peer-left');
-      socket.off('user-joined');
+      socket.off('user-joined', onUserJoined);
+      socket.off('offer', onOffer);
+      socket.off('answer', onAnswer);
+      socket.off('ice-candidate', onIceCandidate);
+      socket.off('peer-left', onPeerLeft);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // <-- Hook vacío, se ejecuta solo al montar. Las refs mantienen los datos vivos.
 
-      Object.keys(currentPeers).forEach(sid => {
-        currentPeers[sid].close();
-        delete currentPeers[sid];
+  // 🔥 Lanzar ofertas si somos nosotros los recién llegados ('others' vienen en el login)
+  useEffect(() => {
+    if (!roomId) {
+      // Limpieza si el componente sigue vivo pero el roomId se borra (ej. salir al dashboard)
+      Object.keys(peersRef.current).forEach(sid => {
+        peersRef.current[sid].close();
+        delete peersRef.current[sid];
       });
       setRemoteStreams({});
-    };
+      initiatedRef.current.clear();
+      return;
+    }
+
+    if (others && others.length > 0) {
+      others.forEach(sid => {
+        if (sid !== socket.id && !initiatedRef.current.has(sid)) {
+          initiatedRef.current.add(sid);
+          console.log("📨 Iniciando oferta proactiva a (Yo soy nuevo):", sid);
+          createPeer(sid, true); // Sí iniciamos nosotros
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, others]);
 
   const toggleScreenShare = async () => {
@@ -187,6 +236,9 @@ export default function VideoChat({ roomId, others = [] }) {
 
   const streamsArray = Object.entries(remoteStreams);
 
+  // Saber si es sala privada vs aleatoria (por si la roomId no es room-X)
+  const isPrivateRoom = roomId && !roomId.startsWith('room-');
+
   return (
     <div className="relative w-full h-full min-h-[460px] bg-black/80 backdrop-blur-md rounded-[40px] overflow-hidden border border-white/10 shadow-3xl">
 
@@ -200,20 +252,28 @@ export default function VideoChat({ roomId, others = [] }) {
         </button>
       </div>
 
+      {isPrivateRoom && (
+        <div className="absolute top-6 right-6 z-[20] bg-indigo-600/20 border border-indigo-500/30 px-4 py-2 rounded-xl backdrop-blur-md">
+          <span className="text-indigo-300 font-black text-[10px] uppercase tracking-[0.2em]">Sala Privada: {roomId}</span>
+        </div>
+      )}
+
       <div className="absolute inset-0 flex items-center justify-center">
         {streamsArray.length === 0 ? (
           <div className="flex flex-col items-center gap-5">
             <div className="w-20 h-20 border-[6px] border-white/10 border-t-indigo-500 rounded-full animate-spin shadow-2xl relative">
               <div className="absolute inset-0 rounded-full shadow-[0_0_20px_#6366f1] animate-pulse"></div>
             </div>
-            <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">Buscando conexión...</p>
+            <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">
+              {roomId ? `Esperando amigos en la sala ${isPrivateRoom ? roomId : ''}...` : "Inicializando cámara..."}
+            </p>
           </div>
         ) : (
           <div className="relative w-full h-full flex items-center justify-center p-6 sm:p-8">
             <div className="hidden lg:grid lg:grid-cols-2 gap-5 w-full h-full">
               {streamsArray.map(([id, stream]) => (
                 <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl">
-                  <video autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
+                  <video autoPlay playsInline muted={false} ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
                   <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
                     <div className="w-2 h-2 rounded-full bg-green-400"></div>
                     <span className="text-white text-[10px] font-black uppercase tracking-widest">En Línea</span>
@@ -225,7 +285,7 @@ export default function VideoChat({ roomId, others = [] }) {
             <div className="flex lg:hidden flex-col items-center justify-center w-full h-full relative group">
               {streamsArray[currentIndex] && (
                 <div className="relative w-full aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 shadow-3xl">
-                  <video key={streamsArray[currentIndex][0]} autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = streamsArray[currentIndex][1])} className="w-full h-full object-cover" />
+                  <video key={streamsArray[currentIndex][0]} autoPlay playsInline muted={false} ref={(el) => el && !el.srcObject && (el.srcObject = streamsArray[currentIndex][1])} className="w-full h-full object-cover" />
                   <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
                     <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
                     <span className="text-white text-[10px] font-black uppercase tracking-widest">{currentIndex + 1}/{streamsArray.length}</span>
@@ -234,13 +294,14 @@ export default function VideoChat({ roomId, others = [] }) {
               )}
 
               {streamsArray.length > 1 && (
-                <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none">
+                <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none z-50">
                   <button onClick={prevPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"><FiChevronLeft size={24} /></button>
                   <button onClick={nextPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"><FiChevronRight size={24} /></button>
                 </div>
               )}
             </div>
           </div>
+
         )}
       </div>
 

@@ -31,14 +31,44 @@ export default function VideoChat({ roomId, others = [] }) {
     setCurrentIndex((prev) => (prev - 1 + total) % total);
   };
 
+  // 📹 Inicialización única del stream local
+  useEffect(() => {
+    const initLocalMedia = async () => {
+      try {
+        if (!localStreamRef.current) {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          localStreamRef.current = stream;
+          if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        }
+      } catch (err) {
+        console.error("❌ Error inicializando cámara local:", err);
+      }
+    };
+    initLocalMedia();
+
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!roomId) return;
 
-    const createPeer = async (socketId, stream, senderOffer = false) => {
+    const createPeer = async (socketId, senderOffer = false) => {
+      // Si ya existe una conexión activa, no crear otra
       if (peersRef.current[socketId]) return peersRef.current[socketId];
 
       const peer = new RTCPeerConnection(configuration);
-      stream.getTracks().forEach((track) => peer.addTrack(track, stream));
+
+      // Añadir tracks locales si existen
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((track) => {
+          peer.addTrack(track, localStreamRef.current);
+        });
+      }
 
       peer.onicecandidate = (e) => {
         if (e.candidate) {
@@ -47,6 +77,7 @@ export default function VideoChat({ roomId, others = [] }) {
       };
 
       peer.ontrack = (e) => {
+        console.log("🎬 Track remoto recibido de:", socketId);
         setRemoteStreams((prev) => ({ ...prev, [socketId]: e.streams[0] }));
       };
 
@@ -60,89 +91,66 @@ export default function VideoChat({ roomId, others = [] }) {
       return peer;
     };
 
-    const initMedia = async () => {
-      try {
-        if (localStreamRef.current) {
-          localStreamRef.current.getTracks().forEach(t => t.stop());
+    // 🔥 Conexión inmediata con participantes existentes (others)
+    if (others.length > 0) {
+      others.forEach(sid => {
+        if (sid !== socket.id) {
+          console.log("📨 Iniciando oferta proactiva a:", sid);
+          createPeer(sid, true);
         }
+      });
+    }
 
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+    socket.on('user-joined', ({ socketId }) => {
+      console.log("🚀 Nuevo participante detectado:", socketId);
+      createPeer(socketId, true);
+    });
 
-        // Limpiar eventos antes de registrar nuevos de señalización
-        socket.off('offer');
-        socket.off('answer');
-        socket.off('ice-candidate');
-        socket.off('peer-left');
-        socket.off('user-joined');
+    socket.on('offer', async ({ offer, from }) => {
+      console.log("📥 Oferta recibida de:", from);
+      const peer = await createPeer(from, false);
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      socket.emit('answer', { roomId, answer, to: from });
+    });
 
-        // 🔥 AHORA SÍ: Iniciamos la conexión con los que Dashboard nos avisó que ya estaban
-        others.forEach(sid => {
-          if (sid !== socket.id) {
-            console.log("📨 Lanzando oferta inicial a participante existente:", sid);
-            createPeer(sid, stream, true);
-          }
+    socket.on('answer', async ({ answer, from }) => {
+      const peer = peersRef.current[from];
+      if (peer) await peer.setRemoteDescription(new RTCSessionDescription(answer));
+    });
+
+    socket.on('ice-candidate', async ({ candidate, from }) => {
+      const peer = peersRef.current[from];
+      if (peer && candidate) await peer.addIceCandidate(new RTCIceCandidate(candidate));
+    });
+
+    socket.on('peer-left', ({ socketId }) => {
+      if (peersRef.current[socketId]) {
+        peersRef.current[socketId].close();
+        delete peersRef.current[socketId];
+        setRemoteStreams((prev) => {
+          const next = { ...prev };
+          delete next[socketId];
+          return next;
         });
-
-        // 🔥 EVENTO: Alguien nuevo entra DESPUÉS de nosotros
-        socket.on('user-joined', ({ socketId }) => {
-          console.log("🚀 Alguien se unió, lanzando oferta a:", socketId);
-          createPeer(socketId, stream, true);
-        });
-
-        socket.on('offer', async ({ offer, from }) => {
-          console.log("📥 Recibida oferta de:", from);
-          const peer = await createPeer(from, stream, false);
-          await peer.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-          socket.emit('answer', { roomId, answer, to: from });
-        });
-
-        socket.on('answer', async ({ answer, from }) => {
-          const peer = peersRef.current[from];
-          if (peer) await peer.setRemoteDescription(new RTCSessionDescription(answer));
-        });
-
-        socket.on('ice-candidate', async ({ candidate, from }) => {
-          const peer = peersRef.current[from];
-          if (peer && candidate) await peer.addIceCandidate(new RTCIceCandidate(candidate));
-        });
-
-        socket.on('peer-left', ({ socketId }) => {
-          if (peersRef.current[socketId]) {
-            peersRef.current[socketId].close();
-            delete peersRef.current[socketId];
-            setRemoteStreams((prev) => {
-              const next = { ...prev };
-              delete next[socketId];
-              return next;
-            });
-          }
-        });
-
-      } catch (err) {
-        console.error("❌ Error de medios:", err);
       }
-    };
+    });
 
-    initMedia();
-
+    const currentPeers = peersRef.current;
     return () => {
-      const currentPeers = peersRef.current;
-      const currentStream = localStreamRef.current;
       socket.off('offer');
       socket.off('answer');
       socket.off('ice-candidate');
       socket.off('peer-left');
       socket.off('user-joined');
-      Object.values(currentPeers).forEach(p => p.close());
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-      peersRef.current = {};
+
+      Object.keys(currentPeers).forEach(sid => {
+        currentPeers[sid].close();
+        delete currentPeers[sid];
+      });
       setRemoteStreams({});
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, others]);
 
   const toggleScreenShare = async () => {
@@ -180,9 +188,8 @@ export default function VideoChat({ roomId, others = [] }) {
   const streamsArray = Object.entries(remoteStreams);
 
   return (
-    <div className="relative w-full h-full min-h-[460px] bg-black/80 backdrop-blur-md rounded-[40px] overflow-hidden border border-white/10 shadow-3xl animate-in fade-in zoom-in duration-500">
+    <div className="relative w-full h-full min-h-[460px] bg-black/80 backdrop-blur-md rounded-[40px] overflow-hidden border border-white/10 shadow-3xl">
 
-      {/* Controles Flotantes Premium */}
       <div className="absolute top-6 left-6 z-[20] flex gap-3">
         <button
           onClick={toggleScreenShare}
@@ -199,33 +206,37 @@ export default function VideoChat({ roomId, others = [] }) {
             <div className="w-20 h-20 border-[6px] border-white/10 border-t-indigo-500 rounded-full animate-spin shadow-2xl relative">
               <div className="absolute inset-0 rounded-full shadow-[0_0_20px_#6366f1] animate-pulse"></div>
             </div>
-            <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">Esperando amigos...</p>
+            <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">Buscando conexión...</p>
           </div>
         ) : (
           <div className="relative w-full h-full flex items-center justify-center p-6 sm:p-8">
-            {/* Grid Layout for Desktop */}
             <div className="hidden lg:grid lg:grid-cols-2 gap-5 w-full h-full">
               {streamsArray.map(([id, stream]) => (
-                <video key={id} autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover bg-[#121216] rounded-[32px] border border-white/10 shadow-3xl" />
+                <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl">
+                  <video autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
+                  <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
+                    <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                    <span className="text-white text-[10px] font-black uppercase tracking-widest">En Línea</span>
+                  </div>
+                </div>
               ))}
             </div>
 
-            {/* Carousel Layout for Mobile */}
-            <div className="flex lg:hidden flex-col items-center justify-center w-full h-full relative">
+            <div className="flex lg:hidden flex-col items-center justify-center w-full h-full relative group">
               {streamsArray[currentIndex] && (
                 <div className="relative w-full aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 shadow-3xl">
                   <video key={streamsArray[currentIndex][0]} autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = streamsArray[currentIndex][1])} className="w-full h-full object-cover" />
-                  <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2">
+                  <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
                     <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
-                    <span className="text-white text-[10px] font-black uppercase">Participante {currentIndex + 1}/{streamsArray.length}</span>
+                    <span className="text-white text-[10px] font-black uppercase tracking-widest">{currentIndex + 1}/{streamsArray.length}</span>
                   </div>
                 </div>
               )}
 
               {streamsArray.length > 1 && (
                 <div className="absolute inset-x-4 flex items-center justify-between pointer-events-none">
-                  <button onClick={prevPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto shadow-xl"><FiChevronLeft size={24} /></button>
-                  <button onClick={nextPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto shadow-xl"><FiChevronRight size={24} /></button>
+                  <button onClick={prevPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"><FiChevronLeft size={24} /></button>
+                  <button onClick={nextPerson} className="p-3 bg-black/50 backdrop-blur-md rounded-full text-white pointer-events-auto hover:bg-black/70 transition"><FiChevronRight size={24} /></button>
                 </div>
               )}
             </div>
@@ -233,7 +244,7 @@ export default function VideoChat({ roomId, others = [] }) {
         )}
       </div>
 
-      <div className={`absolute bottom-6 left-6 sm:left-auto sm:right-6 ${isSharingScreen ? 'w-full max-w-[260px]' : 'w-36 h-28 sm:w-56 sm:h-40'} bg-black/60 backdrop-blur-3xl border border-white/30 rounded-[28px] overflow-hidden shadow-3xl transition-all duration-700 hover:rotate-1 group ring-2 ring-white/10 z-[30]`}>
+      <div className={`absolute bottom-6 left-6 sm:left-auto sm:right-6 ${isSharingScreen ? 'w-full max-w-[260px]' : 'w-36 h-28 sm:w-56 sm:h-40'} bg-black/60 backdrop-blur-3xl border border-white/30 rounded-[28px] overflow-hidden shadow-3xl transition-all duration-700 z-[30]`}>
         <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-500" />
         <div className="absolute top-3 left-3 px-3 py-1 bg-indigo-600 rounded-xl border border-white/20 text-white text-[8px] font-black uppercase tracking-widest shadow-xl">
           {isSharingScreen ? 'Tu Pantalla' : 'Tú'}

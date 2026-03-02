@@ -25,14 +25,15 @@ export default function Dashboard() {
 
     socket.on('waiting', () => setStatus('searching'));
 
-    socket.on('matched', ({ roomId: rid }) => {
-      console.log('🎯 matched in room:', rid);
+    socket.on('matched', ({ roomId: rid, others: o }) => {
+      console.log('🎯 matched in room:', rid, 'with others:', o);
       setRoomId(rid);
-      setOthers([]); // En random usualmente empezamos de 0 o el otro ya está
+      setOthers(o || []);
       setStatus('matched');
     });
 
     socket.on('joined-room', ({ roomId: rid, others: o }) => {
+      console.log('📡 joined room:', rid, 'with others:', o);
       setRoomId(rid);
       setOthers(o || []);
       setStatus('matched');
@@ -45,9 +46,10 @@ export default function Dashboard() {
 
     socket.on('user-joined', ({ socketId }) => {
       console.log('👤 Alguien se unió:', socketId);
+      // No reseteamos 'others' aquí para no resetear el VideoChat, 
+      // pero el componente VideoChat ya escucha 'user-joined' internamente.
       setStatus('matched');
     });
-
 
     socket.on('error', (msg) => {
       console.warn('⚠️ Server error:', msg);
@@ -55,9 +57,16 @@ export default function Dashboard() {
       setStatus('idle');
     });
 
-    socket.on('call-ended', () => {
-      leave();
-      showAlert('Llamada Finalizada', 'La otra persona se ha ido.', 'info');
+    socket.on('call-ended', (data) => {
+      leave(false); // No emitimos leave porque el servidor ya cerró la sala
+
+      if (data?.mode === 'random') {
+        // Omegle Mode: Buscar siguiente automáticamente
+        console.log("♻️ La otra persona se fue. Buscando siguiente...");
+        startSearching();
+      } else {
+        showAlert('Llamada Finalizada', 'La otra persona se ha ido.', 'info');
+      }
     });
 
     return () => {
@@ -73,7 +82,6 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
   const showAlert = (title, message, type = 'info') => {
     setModalConfig({ title, message, type });
     setIsModalOpen(true);
@@ -81,6 +89,8 @@ export default function Dashboard() {
 
   const startSearching = () => {
     setStatus('searching');
+    setRoomId(null);
+    setOthers([]);
     socket.emit('ready');
   };
 
@@ -98,15 +108,16 @@ export default function Dashboard() {
     socket.emit('join-room', { roomId: joinCode.toUpperCase() });
   };
 
-  const leave = () => {
-    if (status === 'matched' || roomId || createdCode) {
+  const leave = (emitLeave = true) => {
+    if (emitLeave && (status === 'matched' || roomId || createdCode)) {
       socket.emit('leave', { roomId: roomId || createdCode });
     }
-    // 🧹 Limpieza TOTAL de estados para evitar re-carga de página
+    // 🧹 Limpieza TOTAL de estados
     setStatus('idle');
     setRoomId(null);
     setCreatedCode(null);
     setJoinCode('');
+    setOthers([]);
   };
 
   const copyCode = () => {
@@ -124,7 +135,6 @@ export default function Dashboard() {
           <div className="w-4 h-4 rounded-full bg-red-600 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]"></div>
           <h1 className="text-2xl font-black text-white tracking-widest text-shadow-glow">JANDOLIVE</h1>
         </div>
-
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 pt-32 pb-12 w-full max-w-screen-2xl mx-auto overflow-y-auto">
@@ -201,7 +211,7 @@ export default function Dashboard() {
           <div className="flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-500">
             <Loader text={status === 'searching' ? "Buscando alguien increíble..." : "Validando código de sala..."} />
             <button
-              onClick={leave}
+              onClick={() => leave(true)}
               className="px-8 py-3 bg-red-500/10 text-red-500 font-black rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all uppercase text-xs tracking-widest shadow-xl active:scale-95"
             >
               Cancelar
@@ -241,7 +251,7 @@ export default function Dashboard() {
             </div>
 
             <button
-              onClick={leave}
+              onClick={() => leave(true)}
               className="w-full py-4 bg-white/5 text-white/40 border border-white/5 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all active:scale-95"
             >
               Cerrar y Salir
@@ -259,7 +269,7 @@ export default function Dashboard() {
 
             {/* Chat Container (Lateral o Inferior) */}
             <div className="flex-none w-full lg:w-[450px] h-[450px] sm:h-[500px] lg:h-[700px] relative">
-              <ChatBox roomId={roomId} onLeave={leave} />
+              <ChatBox roomId={roomId} onLeave={() => leave(true)} />
             </div>
           </div>
         )}

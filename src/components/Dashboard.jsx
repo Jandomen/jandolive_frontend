@@ -70,8 +70,10 @@ export default function Dashboard() {
     socket.emit('ready');
   };
 
+  const [maxParticipants, setMaxParticipants] = useState(10);
+
   const createPrivateRoom = () => {
-    socket.emit('create-private-room');
+    socket.emit('create-private-room', { maxParticipants });
   };
 
   const joinByCode = () => {
@@ -144,12 +146,26 @@ export default function Dashboard() {
                 <span className="relative z-10">Búsqueda Aleatoria</span>
               </button>
 
-              <button
-                onClick={createPrivateRoom}
-                className="group relative flex items-center gap-3 px-8 py-4 bg-white/10 text-white text-lg font-bold rounded-2xl shadow-xl border border-white/30 hover:bg-white/20 hover:scale-105 transition-all duration-300"
-              >
-                <FiKey className="text-xl" /> Crear Sala Privada
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={createPrivateRoom}
+                  className="group relative flex items-center justify-center gap-3 px-8 py-4 bg-white/10 text-white text-lg font-bold rounded-2xl shadow-xl border border-white/30 hover:bg-white/20 hover:scale-105 transition-all duration-300"
+                >
+                  <FiKey className="text-xl" /> Crear Sala Privada
+                </button>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-white/60 text-xs font-bold uppercase tracking-widest">Límite:</span>
+                  <input
+                    type="number"
+                    min="2" max="20"
+                    value={maxParticipants}
+                    onChange={(e) => setMaxParticipants(e.target.value)}
+                    className="w-16 bg-white/5 border border-white/20 rounded-lg px-2 py-1 text-white text-center font-bold"
+                  />
+                  <FiUsers className="text-white/40" />
+                </div>
+              </div>
+
             </div>
 
             {/* Unirse por código */}

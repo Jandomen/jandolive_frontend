@@ -21,61 +21,87 @@ export default function VideoChat({ roomId }) {
   useEffect(() => {
     if (!roomId) return;
 
-    const createPeer = (socketId, stream, isOffer = true) => {
+    const createPeer = async (socketId, stream, senderOffer = false) => {
+      // 🛡️ Evitar duplicar conexiones
+      if (peersRef.current[socketId]) return peersRef.current[socketId];
+
       const peer = new RTCPeerConnection(configuration);
       stream.getTracks().forEach((track) => peer.addTrack(track, stream));
 
-      peer.onicecandidate = (e) => e.candidate && socket.emit('ice-candidate', { roomId, candidate: e.candidate, to: socketId });
-      peer.ontrack = (e) => setRemoteStreams((prev) => ({ ...prev, [socketId]: e.streams[0] }));
+      peer.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('ice-candidate', { roomId, candidate: e.candidate, to: socketId });
+        }
+      };
 
-      if (isOffer) {
-        peer.createOffer()
-          .then((off) => peer.setLocalDescription(off))
-          .then(() => socket.emit('offer', { roomId, offer: peer.localDescription, to: socketId }));
+      peer.ontrack = (e) => {
+        setRemoteStreams((prev) => ({ ...prev, [socketId]: e.streams[0] }));
+      };
+
+      // Si somos el "emisor" de la oferta (p. Ej., al detectar un nuevo usuario)
+      if (senderOffer) {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit('offer', { roomId, offer: peer.localDescription, to: socketId });
       }
 
+      peersRef.current[socketId] = peer;
       return peer;
     };
 
     const initMedia = async () => {
       try {
+        // Limpiamos flujos anteriores si existen
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(t => t.stop());
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-        // Entrar a la sala e informar al servidor
+        // Limpiar eventos antes de registrar nuevos
+        socket.off('user-joined');
+        socket.off('offer');
+        socket.off('answer');
+        socket.off('ice-candidate');
+        socket.off('peer-left');
+
+        // Entramos a la sala
         socket.emit('join-room', { roomId });
 
-        // Cuando alguien SE UNE (nosotros recibimos el aviso)
+        // 🔥 EVENTO: Alguien nuevo entró (nosotros lanzamos oferta)
         socket.on('user-joined', ({ socketId }) => {
-          console.log("Nuevo usuario detectado, creando oferta...", socketId);
-          if (!peersRef.current[socketId]) {
-            peersRef.current[socketId] = createPeer(socketId, stream, true);
-          }
+          console.log("🚀 Nuevo usuario en sala, lanzando oferta a:", socketId);
+          createPeer(socketId, stream, true);
         });
 
-        // Cuando recibimos UNA OFERTA de alguien que ya estaba
+        // 🔥 EVENTO: Recibimos una oferta (nosotros respondemos)
         socket.on('offer', async ({ offer, from }) => {
-          console.log("Recibida oferta de:", from);
-          if (!peersRef.current[from]) {
-            const peer = createPeer(from, stream, false);
-            peersRef.current[from] = peer;
-            await peer.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await peer.createAnswer();
-            await peer.setLocalDescription(answer);
-            socket.emit('answer', { roomId, answer, to: from });
-          }
+          console.log("📥 Recibida oferta de:", from);
+          const peer = await createPeer(from, stream, false);
+          await peer.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          socket.emit('answer', { roomId, answer, to: from });
         });
 
         socket.on('answer', async ({ answer, from }) => {
-          if (peersRef.current[from]) await peersRef.current[from].setRemoteDescription(new RTCSessionDescription(answer));
+          const peer = peersRef.current[from];
+          if (peer) {
+            await peer.setRemoteDescription(new RTCSessionDescription(answer));
+          }
         });
 
         socket.on('ice-candidate', async ({ candidate, from }) => {
-          if (peersRef.current[from] && candidate) await peersRef.current[from].addIceCandidate(new RTCIceCandidate(candidate));
+          const peer = peersRef.current[from];
+          if (peer && candidate) {
+            await peer.addIceCandidate(new RTCIceCandidate(candidate));
+          }
         });
 
         socket.on('peer-left', ({ socketId }) => {
+          console.log("👋 Usuario se fue:", socketId);
           if (peersRef.current[socketId]) {
             peersRef.current[socketId].close();
             delete peersRef.current[socketId];
@@ -86,18 +112,19 @@ export default function VideoChat({ roomId }) {
             });
           }
         });
+
       } catch (err) {
-        console.error("Error media:", err);
+        console.error("❌ Error de medios:", err);
       }
     };
 
     initMedia();
 
-    // Capturamos los valores de las refs AQUÍ, antes del cleanup
-    const currentPeers = peersRef.current;
-    const currentStream = localStreamRef.current;
-
+    // 🧹 Cleanup Quirúrgico: Cerramos todo para poder re-conectar sin recargar la página
     return () => {
+      const currentPeers = peersRef.current;
+      const currentStream = localStreamRef.current;
+
       socket.off('user-joined');
       socket.off('offer');
       socket.off('answer');
@@ -108,6 +135,8 @@ export default function VideoChat({ roomId }) {
       if (currentStream) {
         currentStream.getTracks().forEach(t => t.stop());
       }
+      peersRef.current = {};
+      setRemoteStreams({});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
@@ -131,7 +160,7 @@ export default function VideoChat({ roomId }) {
         stopScreenShare();
       }
     } catch (err) {
-      console.error("Error sharing screen:", err);
+      console.error("Error al compartir escritorio:", err);
     }
   };
 
@@ -147,33 +176,35 @@ export default function VideoChat({ roomId }) {
   };
 
   return (
-    <div className="relative w-full h-full min-h-[450px] bg-black/80 backdrop-blur-md rounded-[32px] overflow-hidden border border-white/20 shadow-2xl animate-in fade-in zoom-in duration-500">
+    <div className="relative w-full h-full min-h-[460px] bg-black/80 backdrop-blur-md rounded-[40px] overflow-hidden border border-white/10 shadow-3xl animate-in fade-in zoom-in duration-500">
 
-      {/* Controles Flotantes */}
+      {/* Controles Flotantes Premium */}
       <div className="absolute top-6 left-6 z-[20] flex gap-3">
         <button
           onClick={toggleScreenShare}
-          className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold text-[10px] uppercase tracking-widest transition-all ${isSharingScreen ? 'bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20 hover:scale-105'}`}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black text-[9px] uppercase tracking-[0.2em] transition-all ${isSharingScreen ? 'bg-red-500 text-white shadow-lg ring-2 ring-red-500/50' : 'bg-white/10 text-white border border-white/20 hover:bg-white/20 hover:translate-y-[-2px] shadow-xl backdrop-blur-md'}`}
         >
-          {isSharingScreen ? <FiVideo /> : <FiMonitor />}
-          {isSharingScreen ? 'Detener Pantalla' : 'Compartir Escritorio'}
+          {isSharingScreen ? <FiVideo className="text-sm" /> : <FiMonitor className="text-sm" />}
+          {isSharingScreen ? 'Detener Pantalla' : 'Compartir Pantalla'}
         </button>
       </div>
 
       <div className="absolute inset-0 flex items-center justify-center">
         {Object.entries(remoteStreams).length === 0 ? (
-          <div className="flex flex-col items-center gap-4">
-            <div className="w-16 h-16 border-4 border-white/20 border-t-indigo-400 rounded-full animate-spin shadow-indigo-500/20 shadow-[0_0_10px_#6366f1]"></div>
-            <p className="text-white/60 font-bold tracking-[0.2em] animate-pulse text-[10px] uppercase">Esperando Amigos...</p>
+          <div className="flex flex-col items-center gap-5">
+            <div className="w-20 h-20 border-[6px] border-white/10 border-t-indigo-500 rounded-full animate-spin shadow-2xl relative">
+              <div className="absolute inset-0 rounded-full shadow-[0_0_20px_#6366f1] animate-pulse"></div>
+            </div>
+            <p className="text-white font-black tracking-[0.4em] animate-pulse text-[11px] uppercase opacity-60">Esperando amigos...</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 p-6 w-full h-full">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-5 p-6 sm:p-8 w-full h-full">
             {Object.entries(remoteStreams).map(([id, stream]) => (
-              <div key={id} className="relative aspect-video bg-black/40 rounded-2xl overflow-hidden border border-white/10 group shadow-2xl transition hover:border-indigo-500/50">
+              <div key={id} className="relative aspect-video bg-[#121216] rounded-[32px] overflow-hidden border border-white/10 group shadow-3xl transition-all hover:border-indigo-500/50 hover:scale-[1.02]">
                 <video autoPlay playsInline ref={(el) => el && !el.srcObject && (el.srcObject = stream)} className="w-full h-full object-cover" />
-                <div className="absolute bottom-4 left-4 px-3 py-1 bg-black/60 backdrop-blur-md border border-white/10 rounded-full flex items-center gap-2 ring-1 ring-white/20">
-                  <div className="w-1.5 h-1.5 rounded-full bg-green-400 shadow-[0_0_5px_#4ade80]"></div>
-                  <span className="text-white text-[9px] font-black uppercase tracking-tighter">Amigo Online</span>
+                <div className="absolute bottom-5 left-5 px-4 py-1.5 bg-black/70 backdrop-blur-xl border border-white/10 rounded-full flex items-center gap-2 shadow-2xl">
+                  <div className="w-2 h-2 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80]"></div>
+                  <span className="text-white text-[10px] font-black uppercase tracking-widest">En Línea</span>
                 </div>
               </div>
             ))}
@@ -181,10 +212,10 @@ export default function VideoChat({ roomId }) {
         )}
       </div>
 
-      {/* Miniatura Local (Tu Cámara) */}
-      <div className={`absolute bottom-6 right-6 ${isSharingScreen ? 'w-full max-w-[280px]' : 'w-40 h-28 sm:w-48 sm:h-36'} bg-black/60 backdrop-blur-2xl border border-white/40 rounded-2-xl overflow-hidden shadow-2xl transition-all duration-700 hover:scale-105 group ring-1 ring-white/30`}>
-        <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-        <div className="absolute top-2 left-2 px-2 py-0.5 bg-indigo-600/90 backdrop-blur-sm rounded-md border border-white/20 text-white text-[8px] font-black uppercase tracking-widest shadow-lg">
+      {/* Miniatura Local (Tu Cámara) - Diseño Premium */}
+      <div className={`absolute bottom-6 left-6 sm:left-auto sm:right-6 ${isSharingScreen ? 'w-full max-w-[260px]' : 'w-44 h-32 sm:w-56 sm:h-40'} bg-black/60 backdrop-blur-3xl border border-white/30 rounded-[28px] overflow-hidden shadow-3xl transition-all duration-700 hover:rotate-1 group ring-2 ring-white/10`}>
+        <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition-all duration-500" />
+        <div className="absolute top-3 left-3 px-3 py-1 bg-indigo-600 rounded-xl border border-white/20 text-white text-[8px] font-black uppercase tracking-widest shadow-xl">
           {isSharingScreen ? 'Tu Pantalla' : 'Tú'}
         </div>
       </div>

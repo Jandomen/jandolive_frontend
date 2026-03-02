@@ -73,25 +73,25 @@ export default function ChatBox({ roomId, onLeave }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input de Chat - Diseñado para dedos grandes 🔘📱 */}
-      <form onSubmit={sendMessage} className="p-5 pb-8 sm:pb-5 bg-white/5 border-t border-white/10 flex gap-3 items-center">
-        <div className="relative flex-1 group">
+      {/* Formulario de Envío - 100% Mobile Safe 📱 */}
+      <form onSubmit={sendMessage} className="p-4 sm:p-5 bg-white/5 border-t border-white/10 flex gap-2 items-center">
+        <div className="flex-1 min-w-0">
           <input
             type="text"
-            placeholder="Escribe aquí..."
+            placeholder="Mensaje..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="w-full bg-white/10 border border-white/20 rounded-[28px] px-6 py-4 text-white placeholder-white/30 focus:ring-2 focus:ring-indigo-500/50 focus:outline-none text-[15px] transition-all shadow-inner group-hover:bg-white/15"
+            className="w-full bg-white/10 border border-white/20 rounded-[24px] px-4 py-3.5 text-white placeholder-white/30 focus:ring-2 focus:ring-indigo-500/50 focus:outline-none text-sm transition-all shadow-inner"
           />
         </div>
         <button
           type="submit"
-          className="w-14 h-14 bg-indigo-600 text-white rounded-[24px] hover:bg-indigo-500 active:scale-90 transition-all shadow-[0_10px_20px_rgba(79,70,229,0.3)] flex items-center justify-center flex-none ring-1 ring-white/20 group hover:shadow-indigo-500/40"
-          title="Enviar Mensaje"
+          className="w-12 h-12 flex-none bg-indigo-600 text-white rounded-[20px] hover:bg-indigo-500 active:scale-90 transition-all shadow-xl flex items-center justify-center ring-1 ring-white/20 group"
         >
-          <FiSend className="text-2xl group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+          <FiSend className="text-xl group-hover:translate-x-0.5 transition-transform" />
         </button>
       </form>
     </div>
   );
 }
+

@@ -101,9 +101,9 @@ export default function Dashboard() {
           <div className="w-4 h-4 rounded-full bg-red-600 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]"></div>
           <h1 className="text-2xl font-black text-white tracking-widest">JANDOLIVE</h1>
         </div>
-        <div className="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10">
-          <FiUsers className="text-white/40 text-sm" />
-          <span className="text-white font-bold text-xs">JANDO LIVE ONLINE</span>
+        <div className="flex items-center gap-4 bg-white/5 px-4 py-1.5 rounded-full border border-white/10 shrink-0">
+          <span className="text-white/40 font-black text-[10px] uppercase tracking-widest hidden sm:inline">Online</span>
+          <span className="text-white font-black text-xs">© {new Date().getFullYear()}</span>
         </div>
       </header>
 
